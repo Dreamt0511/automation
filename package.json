@@ -1,0 +1,12 @@
+{
+  "name": "automation",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build:web": "pnpm --filter @automation/web build",
+    "dev": "pnpm --filter @automation/web dev",
+    "package:tutti-app": "node ./scripts/package-tutti-app.mjs",
+    "test:server": "python3 -m unittest server_test.py",
+    "typecheck": "pnpm --filter @automation/web typecheck"
+  }
+}
