@@ -63,25 +63,66 @@ export type AppContext = {
   runtimeDir: string;
 };
 
+export type RunnerReasoningLevel = {
+  id?: string;
+  effort?: string;
+  value?: string;
+  label?: string;
+  name?: string;
+  description?: string;
+};
+
 export type RunnerModel = {
   id: string;
   label?: string;
-  reasoningLevels?: Array<{ id: string; label?: string }>;
+  name?: string;
+  description?: string;
+  current?: string;
+  effective?: string;
+  defaultValue?: string;
+  defaultReasoningLevel?: string;
+  reasoningLevels?: RunnerReasoningLevel[];
   permissionModes?: Array<{ id: string; label?: string }>;
+};
+
+export type RunnerProvider = {
+  id?: string;
+  provider?: string;
+  label?: string;
+  name?: string;
+  status?: string;
+};
+
+export type RunnerPermissionMode = {
+  id: string;
+  label?: string;
+  name?: string;
+  description?: string;
+  current?: boolean;
+  effective?: boolean;
 };
 
 export type RunnerOptions = {
   available: boolean;
   provider?: string;
+  defaultProvider?: string;
   currentModel?: string;
+  currentReasoningLevel?: string;
+  permissionMode?: string;
   models?: RunnerModel[];
-  providers?: Array<{ id: string; label?: string }>;
+  providers?: RunnerProvider[];
+  permissionConfig?: {
+    configurable?: boolean;
+    defaultValue?: string;
+    modes?: RunnerPermissionMode[];
+  };
 };
 
 export type CwdOption = {
   id: string;
   label: string;
   path: string;
+  kind?: string;
 };
 
 export type AutomationFormPayload = {

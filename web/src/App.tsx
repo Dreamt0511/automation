@@ -5,6 +5,7 @@ import { AutomationList } from './components/AutomationList';
 import { ConfigDialog } from './components/ConfigDialog';
 import { DeleteConfirmDialog } from './components/DeleteConfirmDialog';
 import { InboxView } from './components/InboxView';
+import { useDetailInfoPopover } from './hooks/useDetailInfoPopover';
 import { useI18n } from './i18n';
 import type {
   AppContext,
@@ -17,6 +18,7 @@ import type {
   ScheduleDraft,
 } from './types';
 import type { TemplateDefinition } from './lib/templates';
+import { templateScheduleDraft } from './lib/templates';
 import { defaultScheduleDraft, scheduleDraftFromAutomation } from './lib/schedule';
 
 type LoadState = {
@@ -47,6 +49,7 @@ export function App() {
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>('all');
   const [configOpen, setConfigOpen] = useState(false);
   const [editingAutomation, setEditingAutomation] = useState<Automation | null>(null);
+  const [createTemplate, setCreateTemplate] = useState<TemplateDefinition | null>(null);
   const [scheduleDraft, setScheduleDraft] = useState<ScheduleDraft>(defaultScheduleDraft);
   const [deleteTarget, setDeleteTarget] = useState<Automation | null>(null);
 
@@ -65,18 +68,24 @@ export function App() {
   const loadAutomations = useCallback(async () => {
     setState((current) => ({ ...current, isLoadingAutomations: true }));
     try {
-      const [automationsResponse, context, runnerOptions, cwdOptions] = await Promise.all([
+      const [automationsResult, contextResult, runnerOptionsResult, cwdOptionsResult] = await Promise.allSettled([
         api<{ automations: Automation[] }>('/api/automations'),
         api<AppContext>('/api/context'),
         api<RunnerOptions>(`/api/runner-options?locale=${encodeURIComponent(locale)}`),
         api<{ directories: CwdOption[] }>('/api/cwd-options'),
       ]);
+      if (automationsResult.status === 'rejected') {
+        throw automationsResult.reason;
+      }
+      if (runnerOptionsResult.status === 'rejected') {
+        setError(runnerOptionsResult.reason instanceof Error ? runnerOptionsResult.reason.message : t('request.failed'));
+      }
       setState((current) => ({
         ...current,
-        automations: automationsResponse.automations,
-        context,
-        runnerOptions,
-        cwdOptions: cwdOptions.directories,
+        automations: automationsResult.value.automations,
+        context: contextResult.status === 'fulfilled' ? contextResult.value : current.context,
+        runnerOptions: runnerOptionsResult.status === 'fulfilled' ? runnerOptionsResult.value : current.runnerOptions,
+        cwdOptions: cwdOptionsResult.status === 'fulfilled' ? cwdOptionsResult.value.directories : current.cwdOptions,
         isLoadingAutomations: false,
       }));
     } catch (loadError) {
@@ -92,14 +101,20 @@ export function App() {
         const response = await api<{ runs: AutomationRun[] }>(
           `/api/runs?automationId=${encodeURIComponent(automationId)}`,
         );
+        const reviewed = await markLoadedRunsReviewed(response.runs);
         setState((current) => ({ ...current, runs: response.runs, isLoadingRuns: false }));
+        if (reviewed) {
+          await loadAutomations();
+        }
       } catch (loadError) {
         setState((current) => ({ ...current, isLoadingRuns: false }));
         setError(loadError instanceof Error ? loadError.message : t('request.failed'));
       }
     },
-    [t],
+    [loadAutomations, t],
   );
+
+  const detailInfo = useDetailInfoPopover({ enabled: Boolean(inboxAutomationId) });
 
   useEffect(() => {
     void loadAutomations();
@@ -112,6 +127,13 @@ export function App() {
     }
     void loadRuns(inboxAutomationId);
   }, [inboxAutomationId, loadRuns]);
+
+  useEffect(() => {
+    document.body.classList.toggle('inbox-open', Boolean(inboxAutomationId));
+    return () => {
+      document.body.classList.remove('inbox-open');
+    };
+  }, [inboxAutomationId]);
 
   useEffect(() => {
     const hasActive = state.automations.some(
@@ -127,28 +149,15 @@ export function App() {
 
   const openCreateDialog = (template?: TemplateDefinition) => {
     setEditingAutomation(null);
-    setScheduleDraft(template ? scheduleDraftFromAutomation({
-      id: '',
-      name: '',
-      prompt: '',
-      cwd: '',
-      enabled: true,
-      scheduleType: 'daily',
-      schedule: {},
-      concurrency: 'queue',
-      runnerSettings: {},
-      runnerArgs: [],
-      env: {},
-      createdAt: '',
-      updatedAt: '',
-      nextRunAt: null,
-    }) : defaultScheduleDraft);
+    setCreateTemplate(template ?? null);
+    setScheduleDraft(template ? templateScheduleDraft(template) : defaultScheduleDraft);
     setConfigOpen(true);
     setError(null);
   };
 
   const openEditDialog = (automation: Automation) => {
     setEditingAutomation(automation);
+    setCreateTemplate(null);
     setScheduleDraft(scheduleDraftFromAutomation(automation));
     setConfigOpen(true);
     setError(null);
@@ -166,6 +175,7 @@ export function App() {
       }
       setConfigOpen(false);
       setEditingAutomation(null);
+      setCreateTemplate(null);
       await loadAutomations();
       if (inboxAutomationId) await loadRuns(inboxAutomationId);
     } catch (saveError) {
@@ -193,6 +203,7 @@ export function App() {
   };
 
   const openInbox = (automationId: string) => {
+    detailInfo.close({ immediate: true });
     setInboxAutomationId(automationId);
     setInboxFilter('all');
   };
@@ -206,14 +217,17 @@ export function App() {
         onEdit={() => inboxAutomation && openEditDialog(inboxAutomation)}
         onDelete={() => inboxAutomation && setDeleteTarget(inboxAutomation)}
         onRun={() => inboxAutomation && void runAutomation(inboxAutomation)}
-        onBack={() => setInboxAutomationId(null)}
+        onBack={() => {
+          detailInfo.close({ immediate: true });
+          setInboxAutomationId(null);
+        }}
       />
 
       {!inboxAutomationId ? (
         <AutomationList
           automations={state.automations}
           isLoading={state.isLoadingAutomations}
-          onCreate={() => openCreateDialog()}
+          onCreate={openCreateDialog}
           onOpenInbox={openInbox}
           onEdit={openEditDialog}
           onDelete={setDeleteTarget}
@@ -226,14 +240,21 @@ export function App() {
           runs={filteredRuns}
           filter={inboxFilter}
           isLoading={state.isLoadingRuns}
+          runnerOptions={state.runnerOptions}
+          statusSectionRef={detailInfo.statusSectionRef}
+          infoButtonRef={detailInfo.infoButtonRef}
+          detailInfoOpen={detailInfo.isOpen}
           onFilterChange={setInboxFilter}
           onRefresh={() => inboxAutomationId && void loadRuns(inboxAutomationId)}
+          onToggleDetailInfo={detailInfo.toggle}
+          onStatusSectionClick={(event) => event.stopPropagation()}
         />
       )}
 
       {configOpen ? (
         <ConfigDialog
           automation={editingAutomation}
+          initialTemplate={createTemplate}
           context={state.context}
           runnerOptions={state.runnerOptions}
           cwdOptions={state.cwdOptions}
@@ -243,6 +264,7 @@ export function App() {
           onClose={() => {
             setConfigOpen(false);
             setEditingAutomation(null);
+            setCreateTemplate(null);
             setError(null);
           }}
           onSave={(payload) => void saveAutomation(payload)}
@@ -258,4 +280,19 @@ export function App() {
       ) : null}
     </main>
   );
+}
+
+async function markLoadedRunsReviewed(runs: AutomationRun[]): Promise<boolean> {
+  const reviewableRuns = runs.filter((run) => run.finishedAt && !run.reviewedAt);
+  if (!reviewableRuns.length) return false;
+  const reviewedAt = new Date().toISOString();
+  await Promise.all(
+    reviewableRuns.map((run) =>
+      api(`/api/runs/${encodeURIComponent(run.id)}/review`, { method: 'POST' }),
+    ),
+  );
+  for (const run of reviewableRuns) {
+    run.reviewedAt = reviewedAt;
+  }
+  return true;
 }
