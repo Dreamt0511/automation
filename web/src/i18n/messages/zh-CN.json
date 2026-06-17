@@ -1,6 +1,6 @@
 {
-  "app.name": "自动化",
-  "app.title": "自动化",
+  "app.name": "Automation",
+  "app.title": "Automation",
   "common.cancel": "取消",
   "common.close": "关闭",
   "common.create": "创建",
@@ -42,6 +42,8 @@
   "form.prompt": "提示词",
   "form.promptAttachFiles": "文件",
   "form.promptMentionEmpty": "无匹配项",
+  "form.promptMentionLoading": "正在搜索...",
+  "form.promptMentionRemove": "移除引用",
   "form.promptPlaceholder": "添加提示词，例如：检查 $sentry 崩溃",
   "form.provider": "提供方",
   "form.reasoning": "推理程度",

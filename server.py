@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 PACKAGE_DIR = Path(os.environ["TUTTI_APP_PACKAGE_DIR"])
+STATIC_DIR = Path(os.environ.get("TUTTI_AUTOMATION_STATIC_DIR") or (PACKAGE_DIR / "static")).expanduser().resolve()
 DATA_DIR = Path(os.environ["TUTTI_APP_DATA_DIR"])
 LOG_DIR = Path(os.environ["TUTTI_APP_LOG_DIR"])
 RUNTIME_DIR = Path(os.environ["TUTTI_APP_RUNTIME_DIR"])
@@ -1849,6 +1850,24 @@ def clean_cli_env(value):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        try:
+            path = urlparse(self.path).path
+            if path == "/healthz":
+                return self.text(200, "ok", send_body=False)
+            if path == "/":
+                return self.serve_static(
+                    "index.html",
+                    "text/html; charset=utf-8",
+                    send_body=False,
+                )
+            if path.startswith("/assets/"):
+                relative = path[len("/assets/") :]
+                return self.serve_static_asset(relative, send_body=False)
+            self.json(404, {"error": "not found"}, send_body=False)
+        except Exception as exc:
+            self.json(500, {"error": str(exc)}, send_body=False)
+
     def do_GET(self):
         try:
             path = urlparse(self.path).path
@@ -2049,36 +2068,44 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
-    def json(self, status, payload):
+    def json(self, status, payload, send_body=True):
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if send_body:
+            self.wfile.write(body)
 
-    def text(self, status, body):
+    def text(self, status, body, send_body=True):
         body = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if send_body:
+            self.wfile.write(body)
 
-    def file(self, path, content_type):
+    def file(self, path, content_type, send_body=True):
         if not path.is_file():
             return self.json(404, {"error": "not found"})
         body = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Pragma", "no-cache")
         self.end_headers()
-        self.wfile.write(body)
+        if send_body:
+            self.wfile.write(body)
 
-    def serve_static(self, relative_path, content_type):
-        return self.file(PACKAGE_DIR / "static" / relative_path, content_type)
+    def serve_static(self, relative_path, content_type, send_body=True):
+        path = (STATIC_DIR / relative_path).resolve()
+        if not path.is_relative_to(STATIC_DIR):
+            return self.json(404, {"error": "not found"})
+        return self.file(path, content_type, send_body=send_body)
 
-    def serve_static_asset(self, relative_path):
+    def serve_static_asset(self, relative_path, send_body=True):
         content_types = {
             ".html": "text/html; charset=utf-8",
             ".js": "text/javascript; charset=utf-8",
@@ -2090,7 +2117,11 @@ class Handler(BaseHTTPRequestHandler):
         }
         suffix = Path(relative_path).suffix.lower()
         content_type = content_types.get(suffix, "application/octet-stream")
-        return self.serve_static(Path("assets") / relative_path, content_type)
+        return self.serve_static(
+            Path("assets") / relative_path,
+            content_type,
+            send_body=send_body,
+        )
 
     def log_message(self, format, *args):
         return
@@ -2114,6 +2145,8 @@ def main():
     host = os.environ.get("TUTTI_APP_HOST", "127.0.0.1")
     port = int(os.environ["TUTTI_APP_PORT"])
     print(f"Automation listening on {host}:{port}", flush=True)
+    if os.environ.get("TUTTI_AUTOMATION_STATIC_DIR"):
+        print(f"Automation static dir override: {STATIC_DIR}", flush=True)
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 

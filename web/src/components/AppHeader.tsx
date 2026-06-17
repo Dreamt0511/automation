@@ -1,5 +1,8 @@
-import { ArrowLeft, FilePlus2, Pencil, Play, Rocket, Trash2 } from 'lucide-react';
+import { Button } from '@tutti-os/ui-system';
+import { ChevronLeft, FilePlus2, Pencil, Rocket, Trash2 } from 'lucide-react';
 import { useI18n } from '../i18n';
+import { isAutomationActive } from '../lib/schedule';
+import { PromptPreviewText } from './PromptPreviewText';
 import type { Automation } from '../types';
 
 type AppHeaderProps = {
@@ -24,40 +27,49 @@ export function AppHeader({
   const { t } = useI18n();
 
   if (inboxAutomation) {
+    const active = isAutomationActive(inboxAutomation);
+
     return (
       <header className="app-header">
         <div id="appTitleBlock">
           <div className="app-title-row">
-            <button
-              className="ui-button ui-button-ghost ui-button-icon-sm detail-info-button"
-              type="button"
-              aria-label={t('common.close')}
-              onClick={onBack}
-            >
-              <ArrowLeft size={16} aria-hidden="true" />
-            </button>
-            <h1 id="appTitle">{inboxAutomation.name}</h1>
+            <h1 id="appTitle">
+              <button className="title-back-button" type="button" onClick={onBack}>
+                <ChevronLeft size={22} aria-hidden="true" />
+                <span>{inboxAutomation.name}</span>
+              </button>
+            </h1>
           </div>
-          <p className="detail-prompt">{inboxAutomation.prompt}</p>
+          <PromptPreviewText as="p" className="detail-prompt" value={inboxAutomation.prompt} />
         </div>
         <div className="detail-actions">
-          <button
-            className="ui-button ui-button-ghost ui-button-dialog ui-button-danger-ghost"
+          <Button
+            variant="ghost"
+            size="dialog"
+            className="text-[var(--state-danger)] hover:bg-[var(--on-danger)] hover:text-[var(--state-danger)]"
             type="button"
             onClick={onDelete}
           >
             <Trash2 size={16} aria-hidden="true" />
             {t('common.delete')}
-          </button>
-          <button className="ui-button ui-button-ghost ui-button-dialog" type="button" onClick={onRun}>
+          </Button>
+          <Button
+            id="runButton"
+            variant="ghost"
+            size="dialog"
+            type="button"
+            disabled={active}
+            aria-busy={active}
+            onClick={onRun}
+          >
             <Rocket size={16} aria-hidden="true" />
             {t('common.runNow')}
-          </button>
+          </Button>
         </div>
-        <button className="primary-action" type="button" onClick={onEdit}>
+        <Button id="headerEditButton" className="primary-action" type="button" onClick={onEdit}>
           <Pencil size={16} aria-hidden="true" />
           {t('common.edit')}
-        </button>
+        </Button>
       </header>
     );
   }
@@ -70,10 +82,10 @@ export function AppHeader({
         </div>
       </div>
       {showCreate ? (
-        <button className="primary-action" type="button" onClick={onCreate}>
+        <Button id="createButton" className="primary-action" type="button" onClick={onCreate}>
           <FilePlus2 size={16} aria-hidden="true" />
           {t('common.create')}
-        </button>
+        </Button>
       ) : null}
     </header>
   );

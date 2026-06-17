@@ -1,19 +1,42 @@
-import DOMPurify from 'dompurify';
-import { ExternalLink } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import { Badge, Button, Spinner } from '@tutti-os/ui-system';
+import { Info } from 'lucide-react';
+import { useCallback, useLayoutEffect, useRef } from 'react';
 import { useI18n } from '../i18n';
-import { automationScheduleLabel, formatDate } from '../lib/schedule';
-import type { Automation, AutomationRun, InboxFilter } from '../types';
+import { api } from '../api';
+import { formatDate } from '../lib/schedule';
+import {
+  isRunActive,
+  runActionLabel,
+  runStatusBadgeVariant,
+  runStatusClass,
+  runStatusLabel,
+} from '../lib/runs';
+import { AutomationStatusSection } from './AutomationStatusSection';
+import { RunSummaryMarkdown } from './RunSummaryMarkdown';
+import type { Automation, AutomationRun, InboxFilter, RunnerOptions } from '../types';
+import type { KeyboardEvent, MouseEvent, RefObject } from 'react';
 
 const filters: InboxFilter[] = ['all', 'success', 'fail', 'skip'];
+
+function inboxFilterLabelKey(filter: InboxFilter): string {
+  if (filter === 'fail') return 'filter.failed';
+  if (filter === 'skip') return 'filter.skipped';
+  return `filter.${filter}`;
+}
 
 type InboxViewProps = {
   automation: Automation | null;
   runs: AutomationRun[];
   filter: InboxFilter;
   isLoading: boolean;
+  runnerOptions: RunnerOptions;
+  statusSectionRef?: RefObject<HTMLElement | null>;
+  infoButtonRef?: RefObject<HTMLButtonElement | null>;
+  detailInfoOpen?: boolean;
   onFilterChange: (filter: InboxFilter) => void;
   onRefresh: () => void;
+  onToggleDetailInfo?: () => void;
+  onStatusSectionClick?: (event: MouseEvent<HTMLElement>) => void;
 };
 
 export function InboxView({
@@ -21,10 +44,16 @@ export function InboxView({
   runs,
   filter,
   isLoading,
+  runnerOptions,
+  statusSectionRef,
+  infoButtonRef,
+  detailInfoOpen = false,
   onFilterChange,
   onRefresh,
+  onToggleDetailInfo,
+  onStatusSectionClick,
 }: InboxViewProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   if (!automation) return null;
 
@@ -39,31 +68,37 @@ export function InboxView({
 
   return (
     <section className="inbox-surface" aria-label={t('aria.automationInbox')}>
-      <div className="inbox-tabs" role="tablist" aria-label={t('aria.resultStatus')}>
-        {filters.map((item) => (
-          <button
-            key={item}
-            className="inbox-tab"
-            type="button"
-            role="tab"
-            data-active={filter === item ? 'true' : 'false'}
-            aria-selected={filter === item}
-            onClick={() => onFilterChange(item)}
-          >
-            {t(`filter.${item === 'fail' ? 'failed' : item}`)}
-          </button>
-        ))}
+      <div className="inbox-tabs-header">
+        <InboxFilterTabs filter={filter} onFilterChange={onFilterChange} />
+        <Button
+          ref={infoButtonRef}
+          id="detailInfoButton"
+          variant="ghost"
+          size="icon-sm"
+          className="detail-info-button inbox-tabs-info-button"
+          type="button"
+          aria-label={t('aria.automationStatus')}
+          aria-controls="statusSection"
+          aria-expanded={detailInfoOpen}
+          aria-haspopup="dialog"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleDetailInfo?.();
+          }}
+        >
+          <Info size={16} aria-hidden="true" />
+        </Button>
       </div>
 
       <div className="tsh-custom-scroll-area run-inbox-scroll-area">
         <div className="run-inbox">
           {isLoading ? (
-            <div className="list-loading" role="status" aria-label={t('loading.runs')}>
-              <span className="loading-spinner" aria-hidden="true" />
+            <div className="empty-inbox inbox-loading" role="status" aria-label={t('loading.runs')}>
+              <Spinner size={22} />
             </div>
           ) : runs.length === 0 ? (
-            <div className="empty-state compact">
-              <p>{t(emptyKey)}</p>
+            <div className="empty-inbox">
+              <h2>{t(emptyKey)}</h2>
             </div>
           ) : (
             runs.map((run) => <RunCard key={run.id} run={run} onRefresh={onRefresh} />)
@@ -71,72 +106,162 @@ export function InboxView({
         </div>
       </div>
 
-      <aside className="status-section detail-status-sidebar" aria-label={t('aria.automationStatus')}>
-        <span className="status-label">{t('status.status')}</span>
-        <div className="status-pill">
-          <span
-            className="status-dot"
-            data-slot="status-dot"
-            data-size="sm"
-            data-tone={automation.enabled ? 'green' : 'amber'}
-            aria-hidden="true"
-          />
-          <span>{automation.enabled ? t('status.active') : t('status.paused')}</span>
-        </div>
-        <div className="status-metrics">
-          <div>
-            <span>{t('status.schedule')}</span>
-            <strong>{automationScheduleLabel(automation, t)}</strong>
-          </div>
-          <div>
-            <span>{t('status.nextRun')}</span>
-            <strong>{automation.nextRunAt ? formatDate(automation.nextRunAt) : t('status.notScheduled')}</strong>
-          </div>
-          <div>
-            <span>{t('status.lastRan')}</span>
-            <strong>{automation.lastRunAt ? formatDate(automation.lastRunAt) : t('status.never')}</strong>
-          </div>
-        </div>
-      </aside>
+      <AutomationStatusSection
+        automation={automation}
+        runnerOptions={runnerOptions}
+        statusSectionRef={statusSectionRef}
+        onSectionClick={onStatusSectionClick}
+      />
     </section>
   );
 }
 
-function RunCard({ run, onRefresh }: { run: AutomationRun; onRefresh: () => void }) {
-  const { t } = useI18n();
-  const statusKey = run.taskStatus ?? run.runStatus;
-  const statusLabel = t(`run.status.${statusKey}` as 'run.status.success');
+function InboxFilterTabs({
+  filter,
+  onFilterChange,
+}: {
+  filter: InboxFilter;
+  onFilterChange: (filter: InboxFilter) => void;
+}) {
+  const { t, locale } = useI18n();
+  const rowRef = useRef<HTMLDivElement>(null);
+  const indicatorRef = useRef<HTMLDivElement>(null);
+  const tabRefs = useRef(new Map<InboxFilter, HTMLButtonElement>());
 
-  const openAgentSession = async () => {
-    await fetch(`/api/runs/${encodeURIComponent(run.id)}/open-agent`, { method: 'POST' });
-    onRefresh();
-  };
+  const setTabRef = useCallback((item: InboxFilter, node: HTMLButtonElement | null) => {
+    if (node) {
+      tabRefs.current.set(item, node);
+      return;
+    }
+    tabRefs.current.delete(item);
+  }, []);
 
-  const summary = run.summary?.trim() || t('result.empty');
-  const sanitized = DOMPurify.sanitize(summary);
+  const syncIndicator = useCallback(() => {
+    const active = tabRefs.current.get(filter);
+    const indicator = indicatorRef.current;
+    if (!active || !indicator) return;
+
+    indicator.style.transform = `translateX(${active.offsetLeft}px)`;
+    indicator.style.width = `${active.offsetWidth}px`;
+    if (indicator.dataset.ready === 'true') return;
+    window.requestAnimationFrame(() => {
+      indicator.dataset.ready = 'true';
+    });
+  }, [filter]);
+
+  useLayoutEffect(() => {
+    syncIndicator();
+  }, [filter, locale, syncIndicator, t]);
+
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => {
+      syncIndicator();
+    });
+    observer.observe(row);
+    for (const tab of tabRefs.current.values()) {
+      observer.observe(tab);
+    }
+    return () => observer.disconnect();
+  }, [filter, locale, syncIndicator]);
 
   return (
-    <article className="run-card">
-      <header className="run-card-header">
-        <div>
-          <strong>{statusLabel}</strong>
-          <small>{formatDate(run.finishedAt ?? run.queuedAt)}</small>
+    <div className="inbox-tabs" data-slot="underline-tabs" role="tablist" aria-label={t('aria.resultStatus')}>
+      <div className="inbox-tabs-viewport" data-slot="underline-tabs-viewport">
+        <div ref={rowRef} className="inbox-tabs-row" data-slot="underline-tabs-row">
+          {filters.map((item) => (
+            <button
+              key={item}
+              ref={(node) => setTabRef(item, node)}
+              className="inbox-tab"
+              type="button"
+              role="tab"
+              data-active={filter === item ? 'true' : 'false'}
+              data-slot="underline-tabs-tab"
+              aria-selected={filter === item}
+              onClick={() => {
+                if (filter === item) return;
+                onFilterChange(item);
+              }}
+            >
+              <span>{t(inboxFilterLabelKey(item))}</span>
+            </button>
+          ))}
+          <div
+            ref={indicatorRef}
+            className="inbox-tabs-indicator"
+            data-slot="underline-tabs-indicator"
+            aria-hidden="true"
+          />
         </div>
-        {run.agentSessionId ? (
-          <button
-            className="ui-button ui-button-ghost ui-button-icon-sm icon-action"
-            type="button"
-            aria-label={t('aria.openAgentSession')}
-            onClick={() => void openAgentSession()}
-          >
-            <ExternalLink size={16} aria-hidden="true" />
-          </button>
-        ) : null}
-      </header>
-      <div className="run-card-body markdown-body">
-        <ReactMarkdown>{sanitized}</ReactMarkdown>
       </div>
-      {run.error ? <p className="run-card-error">{run.error}</p> : null}
+    </div>
+  );
+}
+
+function RunCard({ run, onRefresh }: { run: AutomationRun; onRefresh: () => void }) {
+  const { t, locale } = useI18n();
+  const hasAgentSession = Boolean(run.agentSessionId);
+  const showProgress = isRunActive(run) && !run.summary?.trim() && !run.error?.trim();
+
+  const openAgentSession = async () => {
+    if (!run.agentSessionId) return;
+    try {
+      await api(`/api/runs/${encodeURIComponent(run.id)}/open-agent`, { method: 'POST' });
+      onRefresh();
+    } catch {
+      // Errors surface on next refresh; keep card interaction silent like the original.
+    }
+  };
+
+  const handleCardClick = (event: MouseEvent<HTMLElement>) => {
+    if (!hasAgentSession) return;
+    if ((event.target as HTMLElement).closest('a, button, input, select, textarea')) return;
+    void openAgentSession();
+  };
+
+  const handleCardKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (!hasAgentSession) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    void openAgentSession();
+  };
+
+  const resultContent = showProgress ? (
+    <div className="run-progress">
+      <Spinner size={15} />
+      <span>{runActionLabel(run.runStatus, t)}</span>
+    </div>
+  ) : (
+    <RunSummaryMarkdown content={run.summary?.trim() || run.error?.trim() || t('result.empty')} />
+  );
+
+  return (
+    <article
+      className={`run-item${hasAgentSession ? ' has-agent-session' : ''}`}
+      role={hasAgentSession ? 'button' : undefined}
+      tabIndex={hasAgentSession ? 0 : undefined}
+      aria-label={hasAgentSession ? t('aria.openAgentSession') : undefined}
+      onClick={handleCardClick}
+      onKeyDown={handleCardKeyDown}
+    >
+      <header className="run-header">
+        <div className="run-time">
+          <strong>{formatDate(run.startedAt ?? run.queuedAt, locale)}</strong>
+        </div>
+        <div className="run-header-actions">
+          <Badge
+            variant={runStatusBadgeVariant(run)}
+            className="run-status"
+            data-status={runStatusClass(run)}
+          >
+            {runStatusLabel(run, t)}
+          </Badge>
+        </div>
+      </header>
+      <div className="run-result rich-text markdown-body">{resultContent}</div>
     </article>
   );
 }

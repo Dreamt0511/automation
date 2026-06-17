@@ -1,6 +1,6 @@
 {
   "app.name": "Automation",
-  "app.title": "Automations",
+  "app.title": "Automation",
   "common.cancel": "Cancel",
   "common.close": "Close",
   "common.create": "Create",
@@ -42,6 +42,8 @@
   "form.prompt": "Prompt",
   "form.promptAttachFiles": "Files",
   "form.promptMentionEmpty": "No matches",
+  "form.promptMentionLoading": "Searching...",
+  "form.promptMentionRemove": "Remove reference",
   "form.promptPlaceholder": "Add prompt e.g. look for crashes in $sentry",
   "form.provider": "Provider",
   "form.reasoning": "Reasoning",

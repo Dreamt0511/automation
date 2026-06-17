@@ -1,13 +1,26 @@
-import { Ellipsis, Pause, Pencil, Play, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import {
+  Badge,
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Spinner,
+  StatusDot,
+} from '@tutti-os/ui-system';
+import { Ellipsis, Pause, Pencil, Play, Plus, Trash2 } from 'lucide-react';
 import { useI18n } from '../i18n';
 import { automationScheduleLabel, isAutomationActive } from '../lib/schedule';
+import { runActionLabel } from '../lib/runs';
+import { featuredEmptyTemplates, type TemplateDefinition } from '../lib/templates';
+import { PromptPreviewText } from './PromptPreviewText';
+import { TemplateIcon } from './TemplateIcon';
 import type { Automation } from '../types';
 
 type AutomationListProps = {
   automations: Automation[];
   isLoading: boolean;
-  onCreate: () => void;
+  onCreate: (template?: TemplateDefinition) => void;
   onOpenInbox: (id: string) => void;
   onEdit: (automation: Automation) => void;
   onDelete: (automation: Automation) => void;
@@ -25,15 +38,14 @@ export function AutomationList({
   onRun,
   onToggleEnabled,
 }: AutomationListProps) {
-  const { t } = useI18n();
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const { t, locale } = useI18n();
 
   if (isLoading) {
     return (
       <section className="automation-surface" aria-label={t('aria.automations')}>
         <div className="automation-list">
           <div className="list-loading" role="status" aria-label={t('loading.automations')}>
-            <span className="loading-spinner" aria-hidden="true" />
+            <Spinner size={22} />
           </div>
         </div>
       </section>
@@ -45,10 +57,29 @@ export function AutomationList({
       <section className="automation-surface" aria-label={t('aria.automations')}>
         <div className="automation-list">
           <div className="empty-state">
+            <div className="empty-icon" aria-hidden="true">
+              <img src="/assets/automation-empty.png" alt="" decoding="async" />
+            </div>
             <h2>{t('empty.automations')}</h2>
-            <button className="primary-action" type="button" onClick={onCreate}>
+            <Button className="primary-action" type="button" onClick={() => onCreate()}>
+              <Plus size={16} aria-hidden="true" />
               {t('common.createAutomation')}
-            </button>
+            </Button>
+            <div className="empty-template-list" aria-label={t('aria.starterTemplates')}>
+              {featuredEmptyTemplates().map((template) => (
+                <button
+                  key={template.id}
+                  className={`empty-template-card template-tone-${template.id}`}
+                  type="button"
+                  onClick={() => onCreate(template)}
+                >
+                  <span className="template-icon" aria-hidden="true">
+                    <TemplateIcon name={template.icon} />
+                  </span>
+                  <span>{t(template.nameKey)}</span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </section>
@@ -67,85 +98,74 @@ export function AutomationList({
                   <strong>{item.name}</strong>
                   <small className="automation-description-row">
                     <span className="automation-schedule-summary">
-                      {automationScheduleLabel(item, t)}
+                      {automationScheduleLabel(item, t, locale)}
                     </span>
                     <span className="automation-description-divider" aria-hidden="true" />
-                    <span className="automation-description-text">{item.prompt}</span>
+                    <PromptPreviewText className="automation-description-text" value={item.prompt} />
                   </small>
                 </span>
               </button>
               <div className="automation-actions">
                 {!item.enabled ? (
-                  <span className="automation-status-badge">{t('status.paused')}</span>
+                  <Badge
+                    variant="destructive"
+                    className="automation-status-badge"
+                    data-status="paused"
+                  >
+                    {t('status.paused')}
+                  </Badge>
                 ) : null}
                 {item.unreviewedRunCount ? (
-                  <span
-                    className="automation-status-dot"
-                    data-slot="status-dot"
-                    data-tone="amber"
-                    data-size="sm"
-                    aria-label={t('aria.hasUpdates')}
-                    role="img"
-                  />
+                  <StatusDot tone="amber" size="sm" ariaLabel={t('aria.hasUpdates')} />
                 ) : null}
                 <div className="action-buttons">
-                  <button
-                    className={`ui-button ui-button-ghost ui-button-icon-sm icon-action ${active ? 'loading' : ''}`}
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className={`icon-action${active ? ' loading' : ''}`}
                     type="button"
-                    aria-label={t('common.run')}
+                    aria-label={active ? runActionLabel(item.activeRunStatus, t) : t('common.run')}
+                    aria-busy={active}
                     disabled={active}
                     onClick={() => onRun(item)}
                   >
-                    <Play size={16} aria-hidden="true" />
-                  </button>
-                  <button
-                    className="ui-button ui-button-ghost ui-button-icon-sm icon-action"
+                    {active ? <Spinner size={16} /> : <Play size={16} aria-hidden="true" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="icon-action"
                     type="button"
                     aria-label={t('common.edit')}
                     onClick={() => onEdit(item)}
                   >
                     <Pencil size={16} aria-hidden="true" />
-                  </button>
-                  <span className="more-menu" data-slot="dropdown-menu">
-                    <button
-                      className="ui-button ui-button-ghost ui-button-icon-sm icon-action"
-                      type="button"
-                      aria-label={t('common.more')}
-                      aria-haspopup="menu"
-                      aria-expanded={openMenuId === item.id}
-                      onClick={() => setOpenMenuId((current) => (current === item.id ? null : item.id))}
-                    >
-                      <Ellipsis size={16} aria-hidden="true" />
-                    </button>
-                    {openMenuId === item.id ? (
-                      <div className="t-dropdown dropdown-menu-content more-dropdown" role="menu">
-                        <button
-                          className="dropdown-menu-item"
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            onToggleEnabled(item, !item.enabled);
-                            setOpenMenuId(null);
-                          }}
-                        >
-                          {item.enabled ? <Pause size={16} /> : <Play size={16} />}
-                          {item.enabled ? t('common.pause') : t('common.resume')}
-                        </button>
-                        <button
-                          className="dropdown-menu-item"
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            onDelete(item);
-                            setOpenMenuId(null);
-                          }}
-                        >
-                          <Trash2 size={16} />
-                          {t('common.delete')}
-                        </button>
-                      </div>
-                    ) : null}
-                  </span>
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="icon-action"
+                        type="button"
+                        aria-label={t('common.more')}
+                      >
+                        <Ellipsis size={16} aria-hidden="true" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="min-w-32 w-max">
+                      <DropdownMenuItem
+                        onSelect={() => onToggleEnabled(item, !item.enabled)}
+                      >
+                        {item.enabled ? <Pause size={16} /> : <Play size={16} />}
+                        {item.enabled ? t('common.pause') : t('common.resume')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => onDelete(item)}>
+                        <Trash2 size={16} />
+                        {t('common.delete')}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             </article>

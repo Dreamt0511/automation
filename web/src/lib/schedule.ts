@@ -118,14 +118,16 @@ export function backendScheduleFromDraft(draft: ScheduleDraft): {
 export function automationScheduleLabel(
   item: Automation,
   t: (key: string, params?: Record<string, string | number>) => string,
+  locale?: string,
 ): string {
   if (item.scheduleType === 'manual') return t('schedule.manual');
-  return scheduleLabelFromDraft(scheduleDraftFromAutomation(item), t);
+  return scheduleLabelFromDraft(scheduleDraftFromAutomation(item), t, locale);
 }
 
 export function scheduleLabelFromDraft(
   draft: ScheduleDraft,
   t: (key: string, params?: Record<string, string | number>) => string,
+  locale?: string,
 ): string {
   if (draft.frequency === 'hourly') {
     return t(`schedule.frequency.${draft.frequency}`);
@@ -133,7 +135,7 @@ export function scheduleLabelFromDraft(
   if (draft.frequency === 'weekly') {
     return t('schedule.weeklyAt', {
       days: weeklyDaysLabel(draft.daysOfWeek, t),
-      time: formatTimeLabel(draft.timeOfDay),
+      time: formatTimeLabel(draft.timeOfDay, locale),
     });
   }
   if (draft.frequency === 'custom') {
@@ -141,7 +143,7 @@ export function scheduleLabelFromDraft(
   }
   return t('schedule.frequencyAt', {
     frequency: t(`schedule.frequency.${draft.frequency}`),
-    time: formatTimeLabel(draft.timeOfDay),
+    time: formatTimeLabel(draft.timeOfDay, locale),
   });
 }
 
@@ -155,20 +157,23 @@ export function weeklyDaysLabel(
     .join(', ');
 }
 
-export function formatTimeLabel(value: string): string {
+export function formatTimeLabel(value: string, locale?: string): string {
   const [hourText, minuteText] = normalizeTimeOfDay(value).split(':');
   const hour = Number(hourText);
   const minute = Number(minuteText);
+  if (locale === 'zh-CN') {
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  }
   const period = hour >= 12 ? 'PM' : 'AM';
   const hour12 = hour % 12 || 12;
   return minute === 0 ? `${hour12}:00 ${period}` : `${hour12}:${String(minute).padStart(2, '0')} ${period}`;
 }
 
-export function formatDate(value: string | null | undefined): string {
+export function formatDate(value: string | null | undefined, locale?: string): string {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleString(locale);
 }
 
 export function isAutomationActive(item: Automation): boolean {
