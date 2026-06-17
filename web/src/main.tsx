@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { TooltipProvider } from '@tutti-os/ui-system';
 import '@tutti-os/ui-system/styles.css';
 import { App } from './App';
 import { AppLocaleProvider } from './i18n';
@@ -15,7 +16,9 @@ if (root) {
   createRoot(root).render(
     <StrictMode>
       <AppLocaleProvider>
-        <App />
+        <TooltipProvider>
+          <App />
+        </TooltipProvider>
       </AppLocaleProvider>
     </StrictMode>,
   );

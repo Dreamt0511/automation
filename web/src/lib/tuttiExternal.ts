@@ -28,11 +28,11 @@ declare global {
 }
 
 const atProviderIds = [
-  // 'file',
-  // 'workspace-issue',
+  'file',
+  'workspace-issue',
   'workspace-app',
-  // 'agent-session',
-  // 'agent-generated-file',
+  'agent-session',
+  'agent-generated-file',
 ] as const satisfies readonly AgentContextMentionProviderId[];
 
 function normalizeMentionPresentation(
@@ -84,14 +84,17 @@ async function resolveAtMention(
   }
 
   try {
+    const entityId = identity.entityId.trim();
+    if (!entityId) {
+      return null;
+    }
     const items = await bridge.query({
-      keyword: '',
+      keyword: entityId,
       maxResults: 100,
       providers: [providerId],
     });
     const item = items.find(
-      (candidate) =>
-        candidate.providerId === providerId && candidate.itemId === identity.entityId,
+      (candidate) => candidate.providerId === providerId && candidate.itemId === entityId,
     );
     if (!item || item.insert.kind !== 'mention') {
       return null;
