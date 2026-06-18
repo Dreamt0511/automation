@@ -1,5 +1,6 @@
 import type { TuttiExternalAtProviderId } from '@tutti-os/workspace-external-core/contracts';
 import type { AutomationTuttiExternalAtQueryResult } from '../lib/tuttiExternalTypes';
+import type { TuttiExternalLogInput } from '../lib/tuttiExternalLogs';
 
 const devWorkspaceId = 'dev-workspace';
 
@@ -144,6 +145,13 @@ function createMockBridge() {
         });
         await new Promise((resolve) => window.setTimeout(resolve, 80));
         return filtered.slice(0, maxResults);
+      },
+    },
+    logs: {
+      write(input: TuttiExternalLogInput) {
+        if (import.meta.env.DEV) {
+          console.info('[tuttiExternal.logs.write]', input);
+        }
       },
     },
   };

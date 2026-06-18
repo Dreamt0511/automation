@@ -19,6 +19,13 @@ type TuttiExternalBridge = {
       providers?: readonly AgentContextMentionProviderId[];
     }): Promise<readonly AutomationTuttiExternalAtQueryResult[]>;
   };
+  logs?: {
+    write(input: {
+      details?: Record<string, unknown>;
+      event: string;
+      level?: 'debug' | 'info' | 'warn' | 'error';
+    }): void;
+  };
 };
 
 declare global {
