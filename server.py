@@ -736,6 +736,7 @@ AGENT_GET_LOG_OMIT_FIELDS = (
     "settings",
     "permissionConfig",
 )
+MANUAL_AGENT_OPEN_RETRY_DELAYS_SECONDS = (0, 0.5, 1.5)
 
 
 def is_agent_get_poll_args(args):
@@ -839,7 +840,7 @@ def start_agent_session(automation, run, log_file):
         "--display-prompt",
         build_run_display_prompt(automation, run),
     ]
-    args.append("--show" if run.get("trigger") == "manual" else "--visible")
+    args.append("--visible")
     if settings.get("model"):
         args.extend(["--model", settings["model"]])
     if settings.get("reasoningEffort"):
@@ -867,10 +868,30 @@ def cancel_agent_session(agent_session_id):
     run_tutti_cli(["agent", "cancel", "--session-id", agent_session_id], timeout=30)
 
 
-def open_agent_session(agent_session_id):
+def open_agent_session(agent_session_id, log_file=None):
     if not agent_session_id:
         raise ValueError("run does not have an agent session")
-    return run_tutti_cli(["agent", "open", "--session-id", agent_session_id], timeout=30)
+    return run_tutti_cli(
+        ["agent", "open", "--session-id", agent_session_id],
+        timeout=30,
+        log_file=log_file,
+    )
+
+
+def open_manual_agent_session_with_retries(agent_session_id, log_file):
+    last_error = None
+    opened_once = False
+    for delay_seconds in MANUAL_AGENT_OPEN_RETRY_DELAYS_SECONDS:
+        if delay_seconds:
+            time.sleep(delay_seconds)
+        try:
+            open_agent_session(agent_session_id, log_file=log_file)
+        except Exception as exc:
+            last_error = exc
+            continue
+        opened_once = True
+    if not opened_once and last_error:
+        raise last_error
 
 
 def agent_session_messages(agent_session_id, log_file=None):
@@ -1421,6 +1442,8 @@ class Runner:
                 run["agentSessionId"] = agent_session_id
                 run["agentProvider"] = str(session.get("provider") or "codex").strip() or "codex"
                 self.store.save_run(run)
+                if run.get("trigger") == "manual":
+                    open_manual_agent_session_with_retries(agent_session_id, log_file)
                 while True:
                     latest = self.store.get_run(id_)
                     if latest and latest["runStatus"] == "canceling":

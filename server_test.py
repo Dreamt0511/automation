@@ -132,7 +132,7 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
 
 
 class AgentSessionLaunchTest(unittest.TestCase):
-    def test_manual_run_requests_agent_gui_activation(self):
+    def test_manual_run_starts_visible_agent_session_without_start_show_activation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
             calls = []
@@ -164,8 +164,8 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 calls[0][calls[0].index("--display-prompt") + 1],
                 "Review the workspace.",
             )
-            self.assertIn("--show", calls[0])
-            self.assertNotIn("--visible", calls[0])
+            self.assertIn("--visible", calls[0])
+            self.assertNotIn("--show", calls[0])
 
     def test_scheduled_run_stays_visible_without_activating_agent_gui(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -201,6 +201,58 @@ class AgentSessionLaunchTest(unittest.TestCase):
             )
             self.assertIn("--visible", calls[0])
             self.assertNotIn("--show", calls[0])
+
+    def test_manual_runner_reopens_created_agent_session_after_persisting_it(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            run = make_run(module, "queued")
+            automation = module.STORE.get_automation(run["automationId"])
+            opened = []
+
+            def fake_open_agent_session(agent_session_id, log_file=None):
+                stored = module.STORE.get_run(run["id"])
+                self.assertEqual(stored["agentSessionId"], agent_session_id)
+                opened.append(agent_session_id)
+
+            with (
+                mock.patch.object(
+                    module,
+                    "start_agent_session",
+                    return_value={"id": "agent-session-1", "provider": "codex"},
+                ),
+                mock.patch.object(module, "open_agent_session", fake_open_agent_session),
+                mock.patch.object(module, "get_agent_session", return_value={"status": "running"}),
+                mock.patch.object(
+                    module,
+                    "terminal_agent_status",
+                    side_effect=[(None, None), ("failed", "stop")],
+                ),
+                mock.patch.object(module, "latest_agent_summary", return_value="Stopped."),
+                mock.patch.object(module.time, "sleep", return_value=None),
+            ):
+                module.Runner(module.STORE).run(run["id"], automation)
+
+            self.assertEqual(opened, ["agent-session-1", "agent-session-1", "agent-session-1"])
+
+    def test_scheduled_runner_does_not_open_created_agent_session(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            run = make_run(module, "queued", trigger="schedule")
+            automation = module.STORE.get_automation(run["automationId"])
+
+            with (
+                mock.patch.object(
+                    module,
+                    "start_agent_session",
+                    return_value={"id": "agent-session-1", "provider": "codex"},
+                ),
+                mock.patch.object(module, "open_agent_session") as open_mock,
+                mock.patch.object(module, "get_agent_session", return_value={"status": "ready"}),
+                mock.patch.object(module, "agent_session_messages", return_value=[]),
+            ):
+                module.Runner(module.STORE).run(run["id"], automation)
+
+            open_mock.assert_not_called()
 
 
 class SchedulerTest(unittest.TestCase):
@@ -480,6 +532,7 @@ class RunCompletionTest(unittest.TestCase):
                     "start_agent_session",
                     return_value={"id": "agent-session-1", "provider": "codex"},
                 ),
+                mock.patch.object(module, "open_agent_session"),
                 mock.patch.object(module, "get_agent_session", return_value={"status": "ready"}),
                 mock.patch.object(
                     module,
@@ -528,7 +581,7 @@ def make_running_run(module):
     return make_run(module, "running")
 
 
-def make_run(module, run_status):
+def make_run(module, run_status, trigger="manual"):
     automation = module.STORE.save_automation(
         module.normalize_automation(
             {
@@ -549,7 +602,7 @@ def make_run(module, run_status):
         {
             "id": "run_123",
             "automationId": automation["id"],
-            "trigger": "manual",
+            "trigger": trigger,
             "runStatus": run_status,
             "prompt": "Review",
             "cwd": str(Path.cwd()),

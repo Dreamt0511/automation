@@ -65,8 +65,11 @@ export function App() {
     return state.runs.filter((run) => run.taskStatus === 'skip');
   }, [inboxFilter, state.runs]);
 
-  const loadAutomations = useCallback(async () => {
-    setState((current) => ({ ...current, isLoadingAutomations: true }));
+  const loadAutomations = useCallback(async (options: { showLoading?: boolean } = {}) => {
+    const showLoading = options.showLoading ?? false;
+    if (showLoading) {
+      setState((current) => ({ ...current, isLoadingAutomations: true }));
+    }
     try {
       const [automationsResult, contextResult, runnerOptionsResult, cwdOptionsResult] = await Promise.allSettled([
         api<{ automations: Automation[] }>('/api/automations'),
@@ -89,14 +92,19 @@ export function App() {
         isLoadingAutomations: false,
       }));
     } catch (loadError) {
-      setState((current) => ({ ...current, isLoadingAutomations: false }));
+      if (showLoading) {
+        setState((current) => ({ ...current, isLoadingAutomations: false }));
+      }
       setError(loadError instanceof Error ? loadError.message : t('request.failed'));
     }
   }, [locale, t]);
 
   const loadRuns = useCallback(
-    async (automationId: string) => {
-      setState((current) => ({ ...current, isLoadingRuns: true }));
+    async (automationId: string, options: { showLoading?: boolean } = {}) => {
+      const showLoading = options.showLoading ?? false;
+      if (showLoading) {
+        setState((current) => ({ ...current, isLoadingRuns: true }));
+      }
       try {
         const response = await api<{ runs: AutomationRun[] }>(
           `/api/runs?automationId=${encodeURIComponent(automationId)}`,
@@ -107,7 +115,9 @@ export function App() {
           await loadAutomations();
         }
       } catch (loadError) {
-        setState((current) => ({ ...current, isLoadingRuns: false }));
+        if (showLoading) {
+          setState((current) => ({ ...current, isLoadingRuns: false }));
+        }
         setError(loadError instanceof Error ? loadError.message : t('request.failed'));
       }
     },
@@ -117,7 +127,7 @@ export function App() {
   const detailInfo = useDetailInfoPopover({ enabled: Boolean(inboxAutomationId) });
 
   useEffect(() => {
-    void loadAutomations();
+    void loadAutomations({ showLoading: true });
   }, [loadAutomations]);
 
   useEffect(() => {
@@ -125,7 +135,7 @@ export function App() {
       setState((current) => ({ ...current, runs: [] }));
       return;
     }
-    void loadRuns(inboxAutomationId);
+    void loadRuns(inboxAutomationId, { showLoading: true });
   }, [inboxAutomationId, loadRuns]);
 
   useEffect(() => {

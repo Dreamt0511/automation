@@ -7,9 +7,11 @@
     "dev": "pnpm --filter @automation/web dev",
     "dev:full": "node ./scripts/dev-full.mjs",
     "dev:host": "node ./scripts/dev-host.mjs",
+    "dev:host:next": "node ./scripts/dev-host.mjs --next",
     "dev:server": "node ./scripts/dev-server.mjs",
     "dev:static": "pnpm --filter @automation/web build -- --watch",
     "package:tutti-app": "node ./scripts/package-tutti-app.mjs",
+    "package:tutti-app:next": "node ./scripts/package-tutti-app.mjs --next",
     "test:server": "python3 -m unittest server_test.py",
     "typecheck": "pnpm --filter @automation/web typecheck"
   }
