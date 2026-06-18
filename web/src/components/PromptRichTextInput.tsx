@@ -31,7 +31,7 @@ export function PromptRichTextInput({
       maxResults={30}
       menuZIndex="var(--z-dialog-popover)"
       minQueryLength={0}
-      placeholder={placeholder}
+      placeholder={value.trim() ? '' : placeholder}
       placeholderClassName="prompt-rich-text-placeholder"
       textareaClassName="prompt-input prompt-rich-text-editor"
       textOverrides={{
