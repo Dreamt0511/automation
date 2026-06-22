@@ -45,7 +45,7 @@ export async function packageTuttiApp(options = {}) {
   const manifestOverrides = variant === 'next'
     ? {
         appId: 'automation-next',
-        name: 'Automation Next',
+        name: 'Automation Task Next',
         description: 'Schedule and review recurring automation runs.',
       }
     : null;
@@ -116,7 +116,7 @@ async function copyPlannedFile(repoRoot, packageRoot, sourceRelative, targetRela
   }
   if (options.variant === 'next' && targetRelative === 'locales/zh-CN/manifest.json') {
     const localeManifest = JSON.parse(await readText(sourcePath));
-    localeManifest.name = '自动化 Next';
+    localeManifest.name = '自动化应用 Next';
     await writeJson(targetPath, localeManifest);
     return;
   }
