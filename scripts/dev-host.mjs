@@ -15,13 +15,13 @@ if (nextMode) {
     packageRoot: nextPackageRoot,
     variant: 'next',
   });
-  console.log('Packaged Automation Next');
+  console.log('Packaged Automation Task Next');
   console.log(`  Package: ${result.packageRoot}`);
   console.log(`  Import archive: ${result.archivePath}`);
   console.log('');
 }
 
-console.log(nextMode ? 'Host static watch mode for Automation Next' : 'Host static watch mode');
+console.log(nextMode ? 'Host static watch mode for Automation Task Next' : 'Host static watch mode');
 console.log('');
 console.log('This rebuilds frontend assets into:');
 console.log(`  ${staticDir}`);
@@ -31,12 +31,12 @@ console.log('');
 if (nextMode) {
   console.log('1. Import the generated archive');
   console.log(`   - ${nextArchivePath}`);
-  console.log('   - It installs as appId automation-next / name Automation Next');
+  console.log('   - It installs as appId automation-next / name Automation Task Next');
   console.log('   - Import once; the package bootstrap runs this repo server.py directly');
   console.log('');
   console.log('2. Live updates after that');
   console.log('   - Frontend: keep this watch process running and refresh the app webview after rebuilds');
-  console.log('   - Backend: restart Automation Next after editing server.py');
+  console.log('   - Backend: restart Automation Task Next after editing server.py');
   console.log('');
 } else {
   console.log('1. Local app imported from this repo root (recommended)');

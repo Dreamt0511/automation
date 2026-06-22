@@ -51,14 +51,14 @@ const fixtureItems: readonly AutomationTuttiExternalAtQueryResult[] = [
   {
     providerId: 'workspace-app',
     itemId: 'automation',
-    label: 'Automation',
+    label: 'Automation Task',
     subtitle: 'Workspace app',
     thumbnailUrl: '/assets/automation-empty.png',
     insert: {
       kind: 'mention',
       mention: {
         entityId: 'automation',
-        label: 'Automation',
+        label: 'Automation Task',
         scope: {
           workspaceId: devWorkspaceId,
         },

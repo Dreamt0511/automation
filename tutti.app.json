@@ -2,7 +2,7 @@
   "schemaVersion": "tutti.app.manifest.v1",
   "appId": "automation",
   "version": "0.1.0",
-  "name": "Automation",
+  "name": "Automation Task",
   "description": "Schedule and review recurring automation runs.",
   "icon": {
     "type": "asset",
