@@ -29,6 +29,7 @@ type LoadState = {
   cwdOptions: CwdOption[];
   isLoadingAutomations: boolean;
   isLoadingRuns: boolean;
+  isLoadingRunnerOptions: boolean;
 };
 
 const initialLoadState: LoadState = {
@@ -39,6 +40,7 @@ const initialLoadState: LoadState = {
   cwdOptions: [],
   isLoadingAutomations: true,
   isLoadingRuns: false,
+  isLoadingRunnerOptions: true,
 };
 
 export function App() {
@@ -78,10 +80,12 @@ export function App() {
   }, []);
 
   const loadRunnerOptions = useCallback(async () => {
+    setState((current) => ({ ...current, isLoadingRunnerOptions: true }));
     try {
       const runnerOptions = await api<RunnerOptions>(`/api/runner-options?locale=${encodeURIComponent(locale)}`);
-      setState((current) => ({ ...current, runnerOptions }));
+      setState((current) => ({ ...current, runnerOptions, isLoadingRunnerOptions: false }));
     } catch (loadError) {
+      setState((current) => ({ ...current, isLoadingRunnerOptions: false }));
       setError(loadError instanceof Error ? loadError.message : t('request.failed'));
     }
   }, [locale, t]);
@@ -279,6 +283,7 @@ export function App() {
           initialTemplate={createTemplate}
           context={state.context}
           runnerOptions={state.runnerOptions}
+          isLoadingRunnerOptions={state.isLoadingRunnerOptions}
           cwdOptions={state.cwdOptions}
           scheduleDraft={scheduleDraft}
           error={error}

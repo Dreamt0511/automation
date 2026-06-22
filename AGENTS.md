@@ -15,19 +15,67 @@ This file applies to the whole `automation` repository.
 ## Development
 
 - Install: `pnpm install`
-- Browser UI dev with mock JSB + local API: `pnpm dev:full`
+- Browser UI dev with mock JSB + local API, best default: `pnpm dev:full`
 - Frontend-only dev server: `pnpm dev`
 - Local API server only: `pnpm dev:server`
-- Tutti host static watch (refresh webview after rebuild): `pnpm dev:host`
+- Tutti host static watch for the normal app id: `pnpm dev:host`
+- Tutti host source-backed debug package, recommended for host validation: `pnpm dev:host:next`
 - Build frontend into `static/`: `pnpm build:web`
 - Package Tutti app: `pnpm package:tutti-app`
+- Package source-backed debug app: `pnpm package:tutti-app:next`
 - Python server tests: `pnpm test:server`
 
 ### Dev modes
 
-- `pnpm dev:full`: best default for UI work. Runs `server.py` on `127.0.0.1:8787` and Vite on `5173`. Vite proxies `/api` and `/tutti`. In dev, the frontend installs a mock `window.tuttiExternal` only when the host has not already injected one.
-- `pnpm dev:host`: rebuilds `static/` on file changes for validation inside Tutti Desktop. Keep the app open and refresh the webview after each rebuild. Prefer importing the local app from this repository root. If you are running a packaged copy from `dist/tutti-app/automation`, export `TUTTI_AUTOMATION_STATIC_DIR` to this repo's `static/` directory and launch Tutti from the same shell so the app process inherits it.
-- `server.py` reads `TUTTI_AUTOMATION_STATIC_DIR` when present; otherwise it serves `TUTTI_APP_PACKAGE_DIR/static`.
+Use `pnpm dev:full` first unless the change specifically needs the real Tutti
+Desktop host, webview bridge, App Center install flow, or workspace app runtime.
+It runs:
+
+- API/runtime server: `server.py` on `http://127.0.0.1:8787`
+- Frontend: Vite on `http://127.0.0.1:5173`
+- Data/log/runtime state under `.dev/`
+
+Vite proxies `/api` and `/tutti` to the local server. Frontend edits hot reload
+in the browser. `server.py` edits require restarting `pnpm dev:full`. In dev,
+the frontend installs a mock `window.tuttiExternal` only when the host has not
+already injected one.
+
+Use `pnpm dev:host:next` for realistic Tutti Desktop validation while keeping
+backend edits source-backed. It packages and watches a separate debug app:
+
+- package root: `dist/tutti-app/automation-next`
+- import archive: `dist/tutti-app/automation-next.zip`
+- app id: `automation-next`
+- display name: `Automation Task Next`
+
+Import `dist/tutti-app/automation-next.zip` once from Tutti Desktop App Center.
+Keep `pnpm dev:host:next` running. Frontend edits rebuild into `static/`; refresh
+the app webview after each rebuild. Backend edits run this repo's `server.py`,
+so restart the Automation Task Next app after changing server code.
+
+Use `pnpm dev:host` only when validating the normal `automation` app id. It
+rebuilds `static/` on file changes. If the installed package is a copied archive
+from `dist/tutti-app/automation`, set:
+
+```sh
+export TUTTI_AUTOMATION_STATIC_DIR=/Users/ryan/dev/nexight/automation/static
+```
+
+Then launch Tutti Desktop from the same shell so the app process inherits the
+override. This makes frontend static assets come from the repository. Backend
+edits still require restarting the app, and copied package installs may require
+repackaging/reimporting unless the host import flow points at the repo source.
+
+`server.py` serves `TUTTI_AUTOMATION_STATIC_DIR` when present; otherwise it
+serves `TUTTI_APP_PACKAGE_DIR/static`.
+
+Use the smaller commands only for focused work:
+
+- `pnpm dev`: Vite frontend only; expects an API target at
+  `AUTOMATION_DEV_API_TARGET` or `http://127.0.0.1:8787`
+- `pnpm dev:server`: server only, with Tutti runtime env vars filled for local
+  browser testing
+- `pnpm dev:static`: static frontend watch into `static/`
 
 ### UI System
 
