@@ -1,16 +1,16 @@
-# Automation CLI Commands
+# Automation Task CLI Commands
 
-The automation app exposes commands under the `automation` scope.
+The Automation Task app exposes commands under the `automation` scope.
 
 ## Commands
 
 ### `tutti automation list`
 
-List automation definitions.
+List automation task definitions.
 
 ### `tutti automation get`
 
-Get one automation definition by id or exact name.
+Get one automation task definition by id or exact name.
 
 Examples:
 
@@ -21,7 +21,7 @@ tutti automation get --name "Daily review"
 
 ### `tutti automation create`
 
-Create an automation definition.
+Create an automation task definition.
 
 Examples:
 
@@ -50,7 +50,7 @@ Runner arguments:
 
 ### `tutti automation update`
 
-Update one automation definition by id. Omitted fields keep their current values.
+Update one automation task definition by id. Omitted fields keep their current values.
 
 Examples:
 
@@ -62,7 +62,7 @@ tutti automation update --automation-id aut_123 --schedule-type cron --cron "0 9
 
 ### `tutti automation delete`
 
-Delete one automation definition and its run history by id.
+Delete one automation task definition and its run history by id.
 
 Examples:
 
@@ -72,7 +72,7 @@ tutti automation delete --automation-id aut_123
 
 ### `tutti automation run`
 
-Trigger one automation immediately by id or exact name.
+Trigger one automation task immediately by id or exact name.
 
 Examples:
 
@@ -83,7 +83,7 @@ tutti automation run --name "Daily review"
 
 ### `tutti automation runs`
 
-List recent automation runs, optionally filtered by automation id.
+List recent automation task runs, optionally filtered by automation task id.
 
 Examples:
 
@@ -94,8 +94,8 @@ tutti automation runs --automation-id aut_123 --limit 20
 
 ### `tutti automation complete-run`
 
-Submit the final structured status for a running automation.
+Submit the final structured status for a running automation task.
 
-This command is intended for automation runner prompts. It updates only the
+This command is intended for automation task runner prompts. It updates only the
 matching running run's task status. The user-facing result should still be sent
 as the agent's normal final Markdown response.

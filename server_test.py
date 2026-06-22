@@ -48,6 +48,8 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
                     "composer-options",
                     "--provider",
                     "codex",
+                    "--include-capability-catalog",
+                    "false",
                     "--locale",
                     "zh-CN",
                 ]:
@@ -114,6 +116,8 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
                     "composer-options",
                     "--provider",
                     "codex",
+                    "--include-capability-catalog",
+                    "false",
                     "--locale",
                     "zh-CN",
                 ],
@@ -132,14 +136,14 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
 
 
 class AgentSessionLaunchTest(unittest.TestCase):
-    def test_manual_run_starts_visible_agent_session_without_start_show_activation(self):
+    def test_manual_run_starts_agent_session_with_show_for_gui_activation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
             calls = []
 
             def fake_run_tutti_cli(args, timeout=30, log_file=None):
                 calls.append(args)
-                return {"session": {"id": "agent-session-1", "provider": "codex"}}
+                return {"session": {"agentSessionId": "agent-session-1", "provider": "codex"}}
 
             automation = {
                 "name": "Review",
@@ -158,14 +162,14 @@ class AgentSessionLaunchTest(unittest.TestCase):
             with mock.patch.object(module, "run_tutti_cli", fake_run_tutti_cli):
                 session = module.start_agent_session(automation, run, log_file=None)
 
-            self.assertEqual(session["id"], "agent-session-1")
+            self.assertEqual(session["agentSessionId"], "agent-session-1")
             self.assertEqual(calls[0][calls[0].index("--title") + 1], "Review")
             self.assertEqual(
                 calls[0][calls[0].index("--display-prompt") + 1],
                 "Review the workspace.",
             )
-            self.assertIn("--visible", calls[0])
-            self.assertNotIn("--show", calls[0])
+            self.assertIn("--show", calls[0])
+            self.assertNotIn("--visible", calls[0])
 
     def test_scheduled_run_stays_visible_without_activating_agent_gui(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -174,7 +178,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
 
             def fake_run_tutti_cli(args, timeout=30, log_file=None):
                 calls.append(args)
-                return {"session": {"id": "agent-session-1", "provider": "codex"}}
+                return {"session": {"agentSessionId": "agent-session-1", "provider": "codex"}}
 
             automation = {
                 "name": "Review",
@@ -193,7 +197,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
             with mock.patch.object(module, "run_tutti_cli", fake_run_tutti_cli):
                 session = module.start_agent_session(automation, run, log_file=None)
 
-            self.assertEqual(session["id"], "agent-session-1")
+            self.assertEqual(session["agentSessionId"], "agent-session-1")
             self.assertEqual(calls[0][calls[0].index("--title") + 1], "Review")
             self.assertEqual(
                 calls[0][calls[0].index("--display-prompt") + 1],
@@ -218,7 +222,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 mock.patch.object(
                     module,
                     "start_agent_session",
-                    return_value={"id": "agent-session-1", "provider": "codex"},
+                    return_value={"agentSessionId": "agent-session-1", "provider": "codex"},
                 ),
                 mock.patch.object(module, "open_agent_session", fake_open_agent_session),
                 mock.patch.object(module, "get_agent_session", return_value={"status": "running"}),
@@ -244,7 +248,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 mock.patch.object(
                     module,
                     "start_agent_session",
-                    return_value={"id": "agent-session-1", "provider": "codex"},
+                    return_value={"agentSessionId": "agent-session-1", "provider": "codex"},
                 ),
                 mock.patch.object(module, "open_agent_session") as open_mock,
                 mock.patch.object(module, "get_agent_session", return_value={"status": "ready"}),
@@ -349,7 +353,7 @@ class AgentGetLogCompactionTest(unittest.TestCase):
             stdout = json.dumps(
                 {
                     "session": {
-                        "id": "agent-session-1",
+                        "agentSessionId": "agent-session-1",
                         "status": "running",
                         "updatedAt": "2026-06-16T12:00:00+00:00",
                         "lastError": None,
@@ -372,7 +376,7 @@ class AgentGetLogCompactionTest(unittest.TestCase):
                     "omitted": ["runtimeContext", "messages"],
                 },
             )
-            self.assertIn('"id": "agent-session-1"', compacted)
+            self.assertIn('"agentSessionId": "agent-session-1"', compacted)
             self.assertIn('"status": "running"', compacted)
             self.assertIn('"updatedAt": "2026-06-16T12:00:00+00:00"', compacted)
             self.assertIn('"lastError": null', compacted)
@@ -389,7 +393,7 @@ class AgentGetLogCompactionTest(unittest.TestCase):
             large_stdout = json.dumps(
                 {
                     "session": {
-                        "id": "agent-session-1",
+                        "agentSessionId": "agent-session-1",
                         "status": "running",
                         "runtimeContext": {"skills": [{"name": "skill-a"}]},
                     }
@@ -422,7 +426,7 @@ class AgentGetLogCompactionTest(unittest.TestCase):
             large_stdout = json.dumps(
                 {
                     "session": {
-                        "id": "agent-session-1",
+                        "agentSessionId": "agent-session-1",
                         "runtimeContext": {"skills": [{"name": "skill-a"}]},
                     }
                 }
@@ -530,7 +534,7 @@ class RunCompletionTest(unittest.TestCase):
                 mock.patch.object(
                     module,
                     "start_agent_session",
-                    return_value={"id": "agent-session-1", "provider": "codex"},
+                    return_value={"agentSessionId": "agent-session-1", "provider": "codex"},
                 ),
                 mock.patch.object(module, "open_agent_session"),
                 mock.patch.object(module, "get_agent_session", return_value={"status": "ready"}),
@@ -554,7 +558,7 @@ class RunCompletionTest(unittest.TestCase):
             self.assertEqual(stored["summary"], "Finished normally.")
             self.assertEqual(
                 stored["error"],
-                "Automation did not submit a task status.",
+                "Automation task did not submit a task status.",
             )
 
     def test_run_prompt_instructs_markdown_final_response_and_completion_command(self):

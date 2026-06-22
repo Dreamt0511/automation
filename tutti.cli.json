@@ -1,15 +1,15 @@
 {
   "schemaVersion": "tutti.app.cli.v1",
   "scope": "automation",
-  "description": "Schedule and review recurring automation runs.",
+  "description": "Create, run, and review recurring automation tasks.",
   "documentation": {
     "file": "COMMANDS.md"
   },
   "commands": [
     {
       "path": ["list"],
-      "summary": "List automations",
-      "description": "List automation definitions.",
+      "summary": "List automation tasks",
+      "description": "List automation task definitions.",
       "output": {
         "defaultMode": "table",
         "json": true,
@@ -34,18 +34,18 @@
     },
     {
       "path": ["get"],
-      "summary": "Get an automation",
-      "description": "Get one automation definition by id or exact name.",
+      "summary": "Get an automation task",
+      "description": "Get one automation task definition by id or exact name.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "automation-id": {
             "type": "string",
-            "description": "Automation id to read."
+            "description": "Automation task id to read."
           },
           "name": {
             "type": "string",
-            "description": "Exact automation name to read when automation-id is omitted."
+            "description": "Exact automation task name to read when automation-id is omitted."
           }
         }
       },
@@ -62,14 +62,14 @@
     },
     {
       "path": ["create"],
-      "summary": "Create an automation",
-      "description": "Create an automation definition.",
+      "summary": "Create an automation task",
+      "description": "Create an automation task definition.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "name": {
             "type": "string",
-            "description": "Automation name."
+            "description": "Automation task name."
           },
           "prompt": {
             "type": "string",
@@ -147,18 +147,18 @@
     },
     {
       "path": ["update"],
-      "summary": "Update an automation",
-      "description": "Update one automation definition by id. Omitted fields keep their current values.",
+      "summary": "Update an automation task",
+      "description": "Update one automation task definition by id. Omitted fields keep their current values.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "automation-id": {
             "type": "string",
-            "description": "Automation id to update."
+            "description": "Automation task id to update."
           },
           "name": {
             "type": "string",
-            "description": "Automation name."
+            "description": "Automation task name."
           },
           "prompt": {
             "type": "string",
@@ -236,14 +236,14 @@
     },
     {
       "path": ["delete"],
-      "summary": "Delete an automation",
-      "description": "Delete one automation definition and its run history by id.",
+      "summary": "Delete an automation task",
+      "description": "Delete one automation task definition and its run history by id.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "automation-id": {
             "type": "string",
-            "description": "Automation id to delete."
+            "description": "Automation task id to delete."
           }
         },
         "required": ["automation-id"]
@@ -261,18 +261,18 @@
     },
     {
       "path": ["run"],
-      "summary": "Run an automation",
-      "description": "Trigger one automation immediately by id or exact name.",
+      "summary": "Run an automation task",
+      "description": "Trigger one automation task immediately by id or exact name.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "automation-id": {
             "type": "string",
-            "description": "Automation id to run."
+            "description": "Automation task id to run."
           },
           "name": {
             "type": "string",
-            "description": "Exact automation name to run when automation-id is omitted."
+            "description": "Exact automation task name to run when automation-id is omitted."
           }
         }
       },
@@ -289,14 +289,14 @@
     },
     {
       "path": ["runs"],
-      "summary": "List automation runs",
-      "description": "List recent automation runs, optionally filtered by automation id.",
+      "summary": "List automation task runs",
+      "description": "List recent automation task runs, optionally filtered by automation task id.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "automation-id": {
             "type": "string",
-            "description": "Automation id to filter runs."
+            "description": "Automation task id to filter runs."
           },
           "limit": {
             "type": "integer",
@@ -310,7 +310,7 @@
         "table": {
           "columns": [
             { "key": "id", "label": "ID" },
-            { "key": "automation-id", "label": "Automation" },
+            { "key": "automation-id", "label": "Task" },
             { "key": "run-status", "label": "Run status" },
             { "key": "task-status", "label": "Task status" },
             { "key": "trigger", "label": "Trigger" },
@@ -328,18 +328,18 @@
     },
     {
       "path": ["complete-run"],
-      "summary": "Submit an automation run status",
-      "description": "Submit the final structured status for the current automation run.",
+      "summary": "Submit an automation task run status",
+      "description": "Submit the final structured status for the current automation task run.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "run-id": {
             "type": "string",
-            "description": "Automation run id to complete."
+            "description": "Automation task run id to complete."
           },
           "status": {
             "type": "string",
-            "description": "Automation result status: success, fail, or skip."
+            "description": "Automation task result status: success, fail, or skip."
           }
         },
         "required": ["run-id", "status"]
