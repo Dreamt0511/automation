@@ -1,5 +1,5 @@
 import { Button } from '@tutti-os/ui-system';
-import { ChevronLeft, FilePlus2, Pencil, Rocket, Trash2 } from 'lucide-react';
+import { ChevronLeft, Pencil, Rocket, Trash2 } from 'lucide-react';
 import { useI18n } from '../i18n';
 import { isAutomationActive } from '../lib/schedule';
 import { PromptPreviewText } from './PromptPreviewText';
@@ -83,7 +83,7 @@ export function AppHeader({
       </div>
       {showCreate ? (
         <Button id="createButton" className="primary-action" type="button" onClick={onCreate}>
-          <FilePlus2 size={16} aria-hidden="true" />
+          <img src="/assets/create-task.svg" alt="" data-icon="create-task" aria-hidden="true" decoding="async" />
           {t('common.create')}
         </Button>
       ) : null}
