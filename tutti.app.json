@@ -3,7 +3,7 @@
   "appId": "automation",
   "version": "0.1.0",
   "name": "Automation Task",
-  "description": "Schedule and review recurring automation runs.",
+  "description": "Create, run, and review recurring automation tasks.",
   "icon": {
     "type": "asset",
     "src": "icon.png"

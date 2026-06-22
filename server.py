@@ -727,7 +727,7 @@ def tutti_cli_command():
     return configured
 
 
-AGENT_GET_POLL_LOG_FIELDS = ("id", "status", "taskStatus", "updatedAt", "lastError")
+AGENT_GET_POLL_LOG_FIELDS = ("agentSessionId", "status", "taskStatus", "updatedAt", "lastError")
 AGENT_GET_LOG_OMIT_FIELDS = (
     "runtimeContext",
     "messages",
@@ -820,7 +820,7 @@ def run_tutti_cli(args, timeout=60, log_file=None):
 
 
 def start_agent_session(automation, run, log_file):
-    title = automation["name"] or "Automation"
+    title = automation["name"] or "Automation Task"
     settings = normalize_runner_settings(
         automation.get("runnerSettings"),
         None,
@@ -840,7 +840,10 @@ def start_agent_session(automation, run, log_file):
         "--display-prompt",
         build_run_display_prompt(automation, run),
     ]
-    args.append("--visible")
+    if run.get("trigger") == "manual":
+        args.append("--show")
+    else:
+        args.append("--visible")
     if settings.get("model"):
         args.extend(["--model", settings["model"]])
     if settings.get("reasoningEffort"):
@@ -1099,7 +1102,14 @@ def default_provider_from_list(providers, preferred=None):
 
 
 def agent_composer_options_payload(provider, locale=None):
-    args = ["agent", "composer-options", "--provider", provider]
+    args = [
+        "agent",
+        "composer-options",
+        "--provider",
+        provider,
+        "--include-capability-catalog",
+        "false",
+    ]
     locale = normalize_locale(locale)
     if locale:
         args.extend(["--locale", locale])
@@ -1436,7 +1446,7 @@ class Runner:
         try:
             with log_path.open("ab") as log_file:
                 session = start_agent_session(automation, run, log_file)
-                agent_session_id = str(session.get("id") or "").strip()
+                agent_session_id = clean_optional_string(session.get("agentSessionId"))
                 if not agent_session_id:
                     raise RuntimeError("agent session was not created")
                 run["agentSessionId"] = agent_session_id
@@ -1471,7 +1481,7 @@ class Runner:
         result_status = latest.get("taskStatus") if latest else None
         if not result_status and status == "succeeded":
             status = "failed"
-            error = "Automation did not submit a task status."
+            error = "Automation task did not submit a task status."
             result_status = "fail"
         if not result_status and status in {"failed", "timed_out"}:
             result_status = "fail"
@@ -1523,7 +1533,7 @@ def automation_completion_instructions():
     return """
 Automation completion contract:
 
-1. Decide whether this automation result is "success", "fail", or "skip".
+1. Decide whether this automation task result is "success", "fail", or "skip".
 2. Submit the result status with the completion command shown below, replacing <status> with success, fail, or skip.
 3. If the completion command fails, fix the problem and retry it before finishing.
 4. After submitting the status successfully, send the user-facing result directly as your normal final Markdown response. Do not wrap the final response in JSON and do not write it to an intermediate file.
@@ -1546,7 +1556,7 @@ def build_run_display_prompt(automation, run):
         clean_optional_string(run.get("prompt"))
         or clean_optional_string(automation.get("prompt"))
         or clean_optional_string(automation.get("name"))
-        or "Run Automation"
+        or "Run automation task"
     )
 
 
@@ -1672,7 +1682,7 @@ def automation_cli_rows(automations):
 def run_cli_columns():
     return [
         {"key": "id", "label": "ID"},
-        {"key": "automation-id", "label": "Automation"},
+        {"key": "automation-id", "label": "Task"},
         {"key": "run-status", "label": "Run status"},
         {"key": "task-status", "label": "Task status"},
         {"key": "trigger", "label": "Trigger"},
@@ -2063,7 +2073,7 @@ class Handler(BaseHTTPRequestHandler):
                             "queued": False,
                             "automation": automation,
                             "activeRunId": active_run_id,
-                            "message": "Automation already has an active run.",
+                            "message": "Automation task already has an active run.",
                         }
                     ),
                 )
@@ -2167,9 +2177,9 @@ def main():
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     host = os.environ.get("TUTTI_APP_HOST", "127.0.0.1")
     port = int(os.environ["TUTTI_APP_PORT"])
-    print(f"Automation listening on {host}:{port}", flush=True)
+    print(f"Automation Task listening on {host}:{port}", flush=True)
     if os.environ.get("TUTTI_AUTOMATION_STATIC_DIR"):
-        print(f"Automation static dir override: {STATIC_DIR}", flush=True)
+        print(f"Automation Task static dir override: {STATIC_DIR}", flush=True)
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 

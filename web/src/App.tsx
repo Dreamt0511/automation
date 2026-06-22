@@ -65,30 +65,37 @@ export function App() {
     return state.runs.filter((run) => run.taskStatus === 'skip');
   }, [inboxFilter, state.runs]);
 
+  const loadContextOptions = useCallback(async () => {
+    const [contextResult, cwdOptionsResult] = await Promise.allSettled([
+      api<AppContext>('/api/context'),
+      api<{ directories: CwdOption[] }>('/api/cwd-options'),
+    ]);
+    setState((current) => ({
+      ...current,
+      context: contextResult.status === 'fulfilled' ? contextResult.value : current.context,
+      cwdOptions: cwdOptionsResult.status === 'fulfilled' ? cwdOptionsResult.value.directories : current.cwdOptions,
+    }));
+  }, []);
+
+  const loadRunnerOptions = useCallback(async () => {
+    try {
+      const runnerOptions = await api<RunnerOptions>(`/api/runner-options?locale=${encodeURIComponent(locale)}`);
+      setState((current) => ({ ...current, runnerOptions }));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : t('request.failed'));
+    }
+  }, [locale, t]);
+
   const loadAutomations = useCallback(async (options: { showLoading?: boolean } = {}) => {
     const showLoading = options.showLoading ?? false;
     if (showLoading) {
       setState((current) => ({ ...current, isLoadingAutomations: true }));
     }
     try {
-      const [automationsResult, contextResult, runnerOptionsResult, cwdOptionsResult] = await Promise.allSettled([
-        api<{ automations: Automation[] }>('/api/automations'),
-        api<AppContext>('/api/context'),
-        api<RunnerOptions>(`/api/runner-options?locale=${encodeURIComponent(locale)}`),
-        api<{ directories: CwdOption[] }>('/api/cwd-options'),
-      ]);
-      if (automationsResult.status === 'rejected') {
-        throw automationsResult.reason;
-      }
-      if (runnerOptionsResult.status === 'rejected') {
-        setError(runnerOptionsResult.reason instanceof Error ? runnerOptionsResult.reason.message : t('request.failed'));
-      }
+      const response = await api<{ automations: Automation[] }>('/api/automations');
       setState((current) => ({
         ...current,
-        automations: automationsResult.value.automations,
-        context: contextResult.status === 'fulfilled' ? contextResult.value : current.context,
-        runnerOptions: runnerOptionsResult.status === 'fulfilled' ? runnerOptionsResult.value : current.runnerOptions,
-        cwdOptions: cwdOptionsResult.status === 'fulfilled' ? cwdOptionsResult.value.directories : current.cwdOptions,
+        automations: response.automations,
         isLoadingAutomations: false,
       }));
     } catch (loadError) {
@@ -97,7 +104,7 @@ export function App() {
       }
       setError(loadError instanceof Error ? loadError.message : t('request.failed'));
     }
-  }, [locale, t]);
+  }, [t]);
 
   const loadRuns = useCallback(
     async (automationId: string, options: { showLoading?: boolean } = {}) => {
@@ -128,7 +135,12 @@ export function App() {
 
   useEffect(() => {
     void loadAutomations({ showLoading: true });
-  }, [loadAutomations]);
+    void loadContextOptions();
+  }, [loadAutomations, loadContextOptions]);
+
+  useEffect(() => {
+    void loadRunnerOptions();
+  }, [loadRunnerOptions]);
 
   useEffect(() => {
     if (!inboxAutomationId) {
