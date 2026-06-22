@@ -92,7 +92,13 @@ export function ConfigDialog({
   useEffect(() => {
     const nextRunnerSelection = resolveRunnerSelection(automation, runnerOptions);
     const nextCwd = automation?.cwd ?? context?.workspaceRoot ?? '';
-    setDialogRunnerOptions(runnerOptions);
+    const preferredProvider = normalizeText(automation?.runnerSettings?.provider);
+    const globalProvider = normalizeText(runnerOptions.provider);
+    const providerCatalogMatches =
+      !preferredProvider || preferredProvider === globalProvider;
+    if (providerCatalogMatches) {
+      setDialogRunnerOptions(runnerOptions);
+    }
     setName(automation?.name ?? (initialTemplate ? t(initialTemplate.nameKey) : ''));
     setPrompt(automation?.prompt ?? (initialTemplate ? t(initialTemplate.promptKey) : ''));
     setCwd(nextCwd);
@@ -105,6 +111,38 @@ export function ConfigDialog({
     setFormError(null);
   }, [automation, context, cwdOptions, initialTemplate, runnerOptions, t]);
 
+  useEffect(() => {
+    const preferredProvider = normalizeText(automation?.runnerSettings?.provider);
+    if (!preferredProvider) return;
+    if (normalizeText(provider) !== preferredProvider) return;
+    const loadedProvider = normalizeText(dialogRunnerOptions.provider);
+    if (loadedProvider === preferredProvider && dialogRunnerOptions.available) return;
+
+    let cancelled = false;
+    setIsLoadingProviderOptions(true);
+    void fetchRunnerOptions(preferredProvider, locale)
+      .then((nextOptions) => {
+        if (cancelled) return;
+        const nextSelection = resolveRunnerSelection(automation, nextOptions);
+        setDialogRunnerOptions(nextOptions);
+        setProvider(nextSelection.provider);
+        setModel(nextSelection.model);
+        setReasoningEffort(nextSelection.reasoningEffort);
+        setPermissionMode(nextSelection.permissionMode);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFormError(t('request.failed'));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingProviderOptions(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [automation, dialogRunnerOptions.available, dialogRunnerOptions.provider, locale, provider, t]);
+
   const scheduleLabel = useMemo(
     () => scheduleLabelFromDraft(scheduleDraft, t, locale),
     [locale, scheduleDraft, t],
@@ -115,10 +153,13 @@ export function ConfigDialog({
     [provider, providerOptions],
   );
   const modelOptions = dialogRunnerOptions.models ?? [];
-  const selectedModel = useMemo(
-    () => modelOptions.find((item) => item.id === model) ?? modelOptions[0] ?? null,
-    [model, modelOptions],
-  );
+  const selectedModel = useMemo(() => {
+    const matched = modelOptions.find((item) => item.id === model);
+    if (matched) return matched;
+    const savedModel = normalizeText(model);
+    if (savedModel) return { id: savedModel, label: savedModel };
+    return modelOptions[0] ?? null;
+  }, [model, modelOptions]);
   const reasoningOptions = selectedModel?.reasoningLevels ?? [];
   const selectedReasoning = useMemo(
     () => reasoningOptions.find((item) => runnerReasoningId(item) === reasoningEffort) ?? reasoningOptions[0] ?? null,
@@ -132,10 +173,19 @@ export function ConfigDialog({
 
   useEffect(() => {
     if (!dialogRunnerOptions.available || isRunnerOptionsLoading) return;
-    const fallbackModel =
-      modelOptions.length === 0 ? normalizeText(dialogRunnerOptions.currentModel) : '';
-    const nextModel = selectedModel?.id ?? fallbackModel;
-    if (nextModel !== model) setModel(nextModel);
+    if (normalizeText(dialogRunnerOptions.provider) !== normalizeText(provider)) return;
+
+    const matchedModel = modelOptions.find((item) => item.id === model);
+    if (!matchedModel) {
+      const fallbackModel =
+        modelOptions.length === 0 ? normalizeText(dialogRunnerOptions.currentModel) : '';
+      if (!normalizeText(model) && fallbackModel) {
+        setModel(fallbackModel);
+      } else if (!normalizeText(model) && modelOptions[0]) {
+        setModel(modelOptions[0].id);
+      }
+    }
+
     const nextReasoning = selectedReasoning ? runnerReasoningId(selectedReasoning) : '';
     if (nextReasoning !== reasoningEffort) setReasoningEffort(nextReasoning);
     const nextPermission = selectedPermission?.id ?? '';
@@ -143,12 +193,13 @@ export function ConfigDialog({
   }, [
     dialogRunnerOptions.available,
     dialogRunnerOptions.currentModel,
+    dialogRunnerOptions.provider,
     isRunnerOptionsLoading,
     model,
-    modelOptions.length,
+    modelOptions,
     permissionMode,
+    provider,
     reasoningEffort,
-    selectedModel,
     selectedPermission,
     selectedReasoning,
   ]);
@@ -170,9 +221,7 @@ export function ConfigDialog({
     if (!nextProvider) return;
     setIsLoadingProviderOptions(true);
     try {
-      const nextOptions = await api<RunnerOptions>(
-        `/api/runner-options?provider=${encodeURIComponent(nextProvider)}&locale=${encodeURIComponent(locale)}`,
-      );
+      const nextOptions = await fetchRunnerOptions(nextProvider, locale);
       const nextSelection = resolveRunnerSelection(
         {
           runnerSettings: {
@@ -581,6 +630,12 @@ function providerRequiresModel(provider: string): boolean {
   return normalized === 'claude-code' || normalized === 'codex' || normalized === 'gemini';
 }
 
+async function fetchRunnerOptions(provider: string, locale: string): Promise<RunnerOptions> {
+  return api<RunnerOptions>(
+    `/api/runner-options?provider=${encodeURIComponent(provider)}&locale=${encodeURIComponent(locale)}`,
+  );
+}
+
 function isRunnerSelectionReady(
   runnerOptions: RunnerOptions,
   provider: string,
@@ -588,6 +643,7 @@ function isRunnerSelectionReady(
   isLoading: boolean,
 ): boolean {
   if (isLoading || !runnerOptions.available) return false;
+  if (normalizeText(runnerOptions.provider) !== normalizeText(provider)) return false;
   if (!providerRequiresModel(provider)) return true;
   const normalizedModel = normalizeText(model);
   if (!normalizedModel) return false;
