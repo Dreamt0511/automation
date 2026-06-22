@@ -98,8 +98,8 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
                         "runtimeContext": {
                             "configOptions": [
                                 {
-                                    "id": "model",
-                                    "currentValue": "legacy-model",
+                                    "id": "effort",
+                                    "currentValue": "high",
                                 }
                             ]
                         },
@@ -133,6 +133,145 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
                 payload["permissionConfig"]["modes"][0]["label"],
                 "代我批准",
             )
+
+    def test_runner_options_prefers_runtime_context_model_options(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+
+            def fake_run_tutti_cli(args, timeout=30, log_file=None):
+                if args == ["agent", "providers"]:
+                    return {
+                        "defaultProvider": "codex",
+                        "providers": [{"provider": "codex", "status": "ready"}],
+                    }
+                if args[:4] == ["agent", "composer-options", "--provider", "codex"]:
+                    return {
+                        "effectiveSettings": {"model": "gpt-5"},
+                        "modelConfig": {"options": []},
+                        "reasoningConfig": {"options": []},
+                        "permissionConfig": {"configurable": False, "modes": []},
+                        "runtimeContext": {
+                            "configOptions": [
+                                {
+                                    "id": "model",
+                                    "currentValue": "gpt-5",
+                                    "options": [
+                                        {"value": "gpt-5", "name": "GPT-5"},
+                                        {"value": "gpt-5.1", "name": "GPT-5.1"},
+                                    ],
+                                }
+                            ]
+                        },
+                    }
+                raise AssertionError(f"unexpected CLI args: {args!r}")
+
+            with mock.patch.object(module, "run_tutti_cli", fake_run_tutti_cli):
+                payload = module.runner_options_payload(provider="codex", locale="en")
+
+            self.assertEqual([item["id"] for item in payload["models"]], ["gpt-5", "gpt-5.1"])
+            self.assertEqual(payload["currentModel"], "gpt-5")
+
+    def test_runner_options_prefers_runtime_context_over_model_config(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+
+            def fake_run_tutti_cli(args, timeout=30, log_file=None):
+                if args == ["agent", "providers"]:
+                    return {
+                        "defaultProvider": "claude-code",
+                        "providers": [{"provider": "claude-code", "status": "ready"}],
+                    }
+                if args[:4] == ["agent", "composer-options", "--provider", "claude-code"]:
+                    return {
+                        "effectiveSettings": {"model": "claude-sonnet-4-20250514"},
+                        "modelConfig": {
+                            "options": [
+                                {"id": "claude-3-5-sonnet", "label": "Claude 3.5 Sonnet"},
+                            ]
+                        },
+                        "reasoningConfig": {"options": []},
+                        "permissionConfig": {"configurable": False, "modes": []},
+                        "runtimeContext": {
+                            "configOptions": [
+                                {
+                                    "id": "model",
+                                    "currentValue": "claude-sonnet-4-20250514",
+                                    "options": [
+                                        {"value": "claude-sonnet-4-20250514", "name": "Sonnet 4"},
+                                        {"value": "claude-opus-4-20250514", "name": "Opus 4"},
+                                    ],
+                                }
+                            ]
+                        },
+                    }
+                raise AssertionError(f"unexpected CLI args: {args!r}")
+
+            with mock.patch.object(module, "run_tutti_cli", fake_run_tutti_cli):
+                payload = module.runner_options_payload(provider="claude-code", locale="en")
+
+            self.assertEqual(
+                [item["id"] for item in payload["models"]],
+                ["claude-sonnet-4-20250514", "claude-opus-4-20250514"],
+            )
+            self.assertEqual(payload["currentModel"], "claude-sonnet-4-20250514")
+
+    def test_runner_options_claude_code_returns_empty_models_from_cli(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+
+            def fake_run_tutti_cli(args, timeout=30, log_file=None):
+                if args == ["agent", "providers"]:
+                    return {
+                        "defaultProvider": "claude-code",
+                        "providers": [{"provider": "claude-code", "status": "ready"}],
+                    }
+                if args[:4] == ["agent", "composer-options", "--provider", "claude-code"]:
+                    return {
+                        "effectiveSettings": {
+                            "model": "default",
+                            "permissionModeId": "default",
+                            "reasoningEffort": "high",
+                        },
+                        "modelConfig": {},
+                        "reasoningConfig": {
+                            "currentValue": "high",
+                            "options": [{"id": "high", "label": "High", "value": "high"}],
+                        },
+                        "permissionConfig": {
+                            "configurable": True,
+                            "modes": [{"id": "default", "label": "Default"}],
+                        },
+                        "runtimeContext": {
+                            "configOptions": [
+                                {
+                                    "id": "effort",
+                                    "currentValue": "high",
+                                    "options": [{"value": "high", "name": "High"}],
+                                }
+                            ]
+                        },
+                    }
+                raise AssertionError(f"unexpected CLI args: {args!r}")
+
+            with mock.patch.object(module, "run_tutti_cli", fake_run_tutti_cli):
+                payload = module.runner_options_payload(provider="claude-code", locale="en")
+
+            self.assertEqual([item["id"] for item in payload["models"]], ["default"])
+            self.assertEqual(payload["currentModel"], "default")
+
+    def test_normalize_automation_requires_model_for_supported_providers(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            with self.assertRaisesRegex(ValueError, "model is required"):
+                module.normalize_automation(
+                    {
+                        "name": "Review",
+                        "prompt": "Review the workspace.",
+                        "cwd": str(Path.cwd()),
+                        "runnerSettings": {"provider": "claude-code"},
+                        "runnerArgs": [],
+                    }
+                )
 
 
 class AgentSessionLaunchTest(unittest.TestCase):
@@ -596,7 +735,7 @@ def make_run(module, run_status, trigger="manual"):
                 "scheduleType": "manual",
                 "schedule": {},
                 "concurrency": "queue",
-                "runnerSettings": {},
+                "runnerSettings": {"provider": "codex", "model": "gpt-5"},
                 "runnerArgs": [],
                 "env": {},
             }

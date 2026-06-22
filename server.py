@@ -27,6 +27,7 @@ PROJECT_MARKERS = ("package.json", "go.mod", "pyproject.toml", "Cargo.toml", ".g
 RESULT_STATUS_VALUES = {"success", "fail", "skip"}
 DEFAULT_AGENT_PROVIDER = "codex"
 AUTOMATION_SUPPORTED_AGENT_PROVIDERS = {"claude-code", "codex", "gemini"}
+MODEL_SUPPORTING_AGENT_PROVIDERS = {"claude-code", "codex", "gemini"}
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -504,7 +505,20 @@ def normalize_automation(payload, existing=None):
         "updatedAt": stamp,
     }
     item["nextRunAt"] = compute_next_run(item, datetime.now(timezone.utc))
+    validate_runner_settings_for_automation(item["runnerSettings"])
     return item
+
+
+def provider_requires_model(provider):
+    return normalize_provider_id(provider) in MODEL_SUPPORTING_AGENT_PROVIDERS
+
+
+def validate_runner_settings_for_automation(runner_settings):
+    if not isinstance(runner_settings, dict):
+        raise ValueError("model is required for the selected agent provider")
+    provider = clean_provider(runner_settings.get("provider"))
+    if provider_requires_model(provider) and not clean_optional_string(runner_settings.get("model")):
+        raise ValueError("model is required for the selected agent provider")
 
 
 def normalize_runner_settings(value, existing=None, runner_args=None):
@@ -1110,10 +1124,13 @@ def agent_composer_options_payload(provider, locale=None):
         "--include-capability-catalog",
         "false",
     ]
+    workspace_root = clean_optional_string(WORKSPACE_ROOT)
+    if workspace_root:
+        args.extend(["--cwd", workspace_root])
     locale = normalize_locale(locale)
     if locale:
         args.extend(["--locale", locale])
-    result = run_tutti_cli(args, timeout=30)
+    result = run_tutti_cli(args, timeout=60)
     effective_settings = (
         result.get("effectiveSettings")
         if isinstance(result.get("effectiveSettings"), dict)
@@ -1125,11 +1142,11 @@ def agent_composer_options_payload(provider, locale=None):
         if isinstance(result.get("reasoningConfig"), dict)
         else {}
     )
-    models = normalize_config_options(model_config.get("options"))
     reasoning_levels = normalize_reasoning_options(reasoning_config.get("options"))
     current_model = clean_optional_string(effective_settings.get("model")) or config_option_selected_value(
         model_config
     )
+    models = resolve_composer_models(result, current_model)
     current_reasoning = clean_optional_string(
         effective_settings.get("reasoningEffort")
     ) or config_option_selected_value(reasoning_config)
@@ -1206,6 +1223,49 @@ def config_option_selected_value(option):
         "default_value",
         "default",
     )
+
+
+def resolve_composer_models(result, current_model):
+    runtime_context = result.get("runtimeContext") if isinstance(result.get("runtimeContext"), dict) else {}
+    models_from_runtime = models_from_runtime_config_options(runtime_context)
+    if models_from_runtime:
+        return models_from_runtime
+    model_config = result.get("modelConfig") if isinstance(result.get("modelConfig"), dict) else {}
+    models_from_config = normalize_config_options(model_config.get("options"))
+    if models_from_config:
+        return append_current_model_option(models_from_config, current_model)
+    return append_current_model_option([], current_model)
+
+
+def models_from_runtime_config_options(runtime_context):
+    config_options = runtime_context.get("configOptions")
+    if not isinstance(config_options, list):
+        return []
+    for option in config_options:
+        if not isinstance(option, dict):
+            continue
+        if clean_optional_string(option.get("id")) != "model":
+            continue
+        models = normalize_config_options(option.get("options"))
+        current = clean_optional_string(option.get("currentValue") or option.get("current_value"))
+        return append_current_model_option(models, current)
+    return []
+
+
+def append_current_model_option(models, current_model):
+    current_model = clean_optional_string(current_model)
+    if not current_model:
+        return models
+    if any(item.get("id") == current_model for item in models):
+        return models
+    return [
+        *models,
+        {
+            "id": current_model,
+            "name": current_model,
+            "label": current_model,
+        },
+    ]
 
 
 def normalize_config_options(options):

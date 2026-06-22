@@ -5,6 +5,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Spinner,
 } from '@tutti-os/ui-system';
 import { ChevronDown, X } from 'lucide-react';
 import { api } from '../api';
@@ -38,6 +39,7 @@ type ConfigDialogProps = {
   initialTemplate?: TemplateDefinition | null;
   context: AppContext | null;
   runnerOptions: RunnerOptions;
+  isLoadingRunnerOptions: boolean;
   cwdOptions: CwdOption[];
   scheduleDraft: ScheduleDraft;
   error: string | null;
@@ -51,6 +53,7 @@ export function ConfigDialog({
   initialTemplate = null,
   context,
   runnerOptions,
+  isLoadingRunnerOptions,
   cwdOptions,
   scheduleDraft,
   error,
@@ -73,7 +76,10 @@ export function ConfigDialog({
   const [permissionMode, setPermissionMode] = useState(initialRunnerSelection.permissionMode);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [cwdCustomMode, setCwdCustomMode] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isLoadingProviderOptions, setIsLoadingProviderOptions] = useState(false);
   const customCwdInputRef = useRef<HTMLInputElement>(null);
+  const isRunnerOptionsLoading = isLoadingRunnerOptions || isLoadingProviderOptions;
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -96,6 +102,7 @@ export function ConfigDialog({
     setReasoningEffort(nextRunnerSelection.reasoningEffort);
     setPermissionMode(nextRunnerSelection.permissionMode);
     setScheduleOpen(false);
+    setFormError(null);
   }, [automation, context, cwdOptions, initialTemplate, runnerOptions, t]);
 
   const scheduleLabel = useMemo(
@@ -124,8 +131,10 @@ export function ConfigDialog({
   );
 
   useEffect(() => {
-    if (!dialogRunnerOptions.available) return;
-    const nextModel = selectedModel?.id ?? '';
+    if (!dialogRunnerOptions.available || isRunnerOptionsLoading) return;
+    const fallbackModel =
+      modelOptions.length === 0 ? normalizeText(dialogRunnerOptions.currentModel) : '';
+    const nextModel = selectedModel?.id ?? fallbackModel;
     if (nextModel !== model) setModel(nextModel);
     const nextReasoning = selectedReasoning ? runnerReasoningId(selectedReasoning) : '';
     if (nextReasoning !== reasoningEffort) setReasoningEffort(nextReasoning);
@@ -133,7 +142,10 @@ export function ConfigDialog({
     if (nextPermission !== permissionMode) setPermissionMode(nextPermission);
   }, [
     dialogRunnerOptions.available,
+    dialogRunnerOptions.currentModel,
+    isRunnerOptionsLoading,
     model,
+    modelOptions.length,
     permissionMode,
     reasoningEffort,
     selectedModel,
@@ -148,8 +160,15 @@ export function ConfigDialog({
   };
 
   const selectProvider = async (nextProvider: string) => {
+    if (nextProvider === provider) return;
+    const previousProvider = provider;
     setProvider(nextProvider);
-    if (!nextProvider || nextProvider === dialogRunnerOptions.provider) return;
+    setModel('');
+    setReasoningEffort('');
+    setPermissionMode('');
+    setFormError(null);
+    if (!nextProvider) return;
+    setIsLoadingProviderOptions(true);
     try {
       const nextOptions = await api<RunnerOptions>(
         `/api/runner-options?provider=${encodeURIComponent(nextProvider)}&locale=${encodeURIComponent(locale)}`,
@@ -169,11 +188,50 @@ export function ConfigDialog({
       setReasoningEffort(nextSelection.reasoningEffort);
       setPermissionMode(nextSelection.permissionMode);
     } catch {
-      setProvider(nextProvider);
+      setFormError(t('request.failed'));
+      setProvider(previousProvider);
+    } finally {
+      setIsLoadingProviderOptions(false);
     }
   };
 
+  const runnerSelectionReady = isRunnerSelectionReady(
+    dialogRunnerOptions,
+    provider,
+    model,
+    isRunnerOptionsLoading,
+  );
+  const modelsUnavailable =
+    !isRunnerOptionsLoading &&
+    dialogRunnerOptions.available &&
+    providerRequiresModel(provider) &&
+    modelOptions.length === 0 &&
+    !normalizeText(dialogRunnerOptions.currentModel);
+
   const submit = () => {
+    const trimmedName = name.trim();
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedName) {
+      setFormError(t('form.titleRequired'));
+      return;
+    }
+    if (!trimmedPrompt) {
+      setFormError(t('form.promptRequired'));
+      return;
+    }
+    if (isRunnerOptionsLoading) {
+      setFormError(t('loading.runnerOptions'));
+      return;
+    }
+    if (!dialogRunnerOptions.available) {
+      setFormError(t('form.runnerOptionsUnavailable'));
+      return;
+    }
+    if (!runnerSelectionReady) {
+      setFormError(t('form.modelRequired'));
+      return;
+    }
+    setFormError(null);
     const scheduleConfig = backendScheduleFromDraft(scheduleDraft);
     onSave({
       name,
@@ -244,7 +302,7 @@ export function ConfigDialog({
             <h2 id="configDialogTitle">{automation ? t('common.edit') : t('common.createAutomation')}</h2>
           </header>
 
-          {error ? <div className="error-banner">{error}</div> : null}
+          {error || formError ? <div className="error-banner">{error ?? formError}</div> : null}
 
           <div className="form-scroll">
             <div className="config-form-fields">
@@ -397,7 +455,12 @@ export function ConfigDialog({
                   </PopoverContent>
                 </Popover>
 
-                {dialogRunnerOptions.available ? (
+                {isRunnerOptionsLoading ? (
+                  <div className="runner-options-loading" role="status" aria-live="polite">
+                    <Spinner size={16} />
+                    <span>{t('loading.runnerOptions')}</span>
+                  </div>
+                ) : dialogRunnerOptions.available ? (
                   <div className="runner-options">
                     <RunnerSelectMenu
                       className="runner-select-tool"
@@ -430,6 +493,26 @@ export function ConfigDialog({
                           );
                         }}
                       />
+                    ) : providerRequiresModel(provider) && dialogRunnerOptions.currentModel ? (
+                      <RunnerSelectMenu
+                        className="runner-select-tool"
+                        label={modelLabel({ id: model || dialogRunnerOptions.currentModel || '' }, t)}
+                        title={t('form.model')}
+                        value={model || dialogRunnerOptions.currentModel || ''}
+                        options={[
+                          {
+                            value: model || dialogRunnerOptions.currentModel || '',
+                            label: modelLabel({ id: model || dialogRunnerOptions.currentModel || '' }, t),
+                          },
+                        ]}
+                        onValueChange={() => {}}
+                      />
+                    ) : null}
+
+                    {modelsUnavailable ? (
+                      <div className="runner-options-unavailable" role="alert">
+                        {t('form.modelsUnavailable')}
+                      </div>
                     ) : null}
 
                     {reasoningOptions.length > 0 ? (
@@ -462,7 +545,11 @@ export function ConfigDialog({
                       />
                     ) : null}
                   </div>
-                ) : null}
+                ) : (
+                  <div className="runner-options-unavailable" role="status">
+                    {t('form.runnerOptionsUnavailable')}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -472,7 +559,13 @@ export function ConfigDialog({
               <Button variant="ghost" size="dialog" type="button" onClick={onClose}>
                 {t('common.cancel')}
               </Button>
-              <Button className="create-submit" size="dialog" type="button" onClick={submit}>
+              <Button
+                className="create-submit"
+                size="dialog"
+                type="button"
+                disabled={!runnerSelectionReady}
+                onClick={submit}
+              >
                 {automation ? t('common.save') : t('common.create')}
               </Button>
             </div>
@@ -481,6 +574,28 @@ export function ConfigDialog({
       </section>
     </div>
   );
+}
+
+function providerRequiresModel(provider: string): boolean {
+  const normalized = normalizeText(provider).toLowerCase();
+  return normalized === 'claude-code' || normalized === 'codex' || normalized === 'gemini';
+}
+
+function isRunnerSelectionReady(
+  runnerOptions: RunnerOptions,
+  provider: string,
+  model: string,
+  isLoading: boolean,
+): boolean {
+  if (isLoading || !runnerOptions.available) return false;
+  if (!providerRequiresModel(provider)) return true;
+  const normalizedModel = normalizeText(model);
+  if (!normalizedModel) return false;
+  const modelOptions = runnerOptions.models ?? [];
+  if (modelOptions.length === 0) {
+    return Boolean(normalizeText(runnerOptions.currentModel));
+  }
+  return modelOptions.some((item) => item.id === normalizedModel);
 }
 
 function resolveRunnerSelection(
