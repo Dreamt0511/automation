@@ -944,9 +944,9 @@ body.inbox-open .app-header h1 {
 
 .empty-template-list {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 10px;
-  width: min(680px, 100%);
+  width: min(920px, 100%);
   margin-top: 30px;
 }
 
@@ -1276,50 +1276,42 @@ body.inbox-open .app-header h1 {
   width: 34px;
   height: 34px;
   border-radius: var(--automation-control-radius);
-  background: var(--transparency-block);
+  background: transparent;
   color: var(--text-tertiary);
   font-size: 18px;
 }
 
 .template-tone-cleanup .template-icon {
-  background: var(--on-accent);
   color: var(--accent);
 }
 
 .template-tone-regression .template-icon {
-  background: var(--on-warning);
   color: var(--state-warning);
 }
 
 .template-tone-ci .template-icon {
-  background: var(--on-primary);
   color: var(--accent);
 }
 
 .template-tone-release-notes .template-icon,
 .template-tone-weekly-update .template-icon {
-  background: var(--on-success);
   color: var(--state-success);
 }
 
 .template-tone-standup .template-icon {
-  background: var(--on-accent-subtle);
   color: var(--accent);
 }
 
 .template-tone-game .template-icon {
-  background: var(--on-danger);
   color: var(--state-danger);
 }
 
 .template-tone-skills .template-icon {
-  background: var(--on-success);
   color: var(--state-success);
 }
 
 .template-tone-review-ready .template-icon,
 .template-tone-bug-scan .template-icon {
-  background: var(--on-danger);
   color: var(--state-danger);
 }
 
@@ -2002,12 +1994,16 @@ body.inbox-open .app-header h1 {
   z-index: 2;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 18px;
   height: var(--config-footer-height);
   border-top: 1px solid var(--line-2);
   background: var(--background-panel);
   padding: 0 24px;
+}
+
+.config-footer .form-controls {
+  justify-content: flex-end;
 }
 
 .create-submit {
