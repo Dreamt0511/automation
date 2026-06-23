@@ -1,6 +1,6 @@
-# Automation Task CLI Commands
+# Automation CLI Commands
 
-The Automation Task app exposes commands under the `automation` scope.
+The Automation app exposes commands under the `automation` scope.
 
 ## Commands
 
