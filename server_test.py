@@ -603,6 +603,93 @@ class AgentGetLogCompactionTest(unittest.TestCase):
             self.assertNotIn("[automation] stdout compacted:", log_text)
 
 
+class AgentSessionSummaryTest(unittest.TestCase):
+    def test_agent_session_messages_uses_session_summary_command(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "messages": [
+                            {
+                                "role": "assistant",
+                                "version": 2,
+                                "text": "Finished normally.",
+                            }
+                        ]
+                    }
+                ),
+                stderr="",
+            )
+
+            with mock.patch.object(module.subprocess, "run", return_value=completed) as run_mock:
+                messages = module.agent_session_messages("agent-session-1")
+
+            self.assertEqual(
+                messages,
+                [{"role": "assistant", "version": 2, "text": "Finished normally."}],
+            )
+            command = run_mock.call_args.args[0]
+            self.assertEqual(
+                command,
+                [
+                    "/usr/local/bin/tutti",
+                    "--json",
+                    "agent",
+                    "session-summary",
+                    "--session-id",
+                    "agent-session-1",
+                    "--limit",
+                    "80",
+                ],
+            )
+
+    def test_latest_agent_summary_reads_session_summary_text_field(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            summary = module.latest_agent_summary_from_messages(
+                [
+                    {"role": "user", "version": 1, "text": "Do the task."},
+                    {"role": "assistant", "version": 2, "text": "All done."},
+                ]
+            )
+            self.assertEqual(summary, "All done.")
+
+    def test_run_keeps_success_when_agent_summary_fetch_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            run = make_run(module, "queued")
+            automation = module.STORE.get_automation(run["automationId"])
+
+            def fake_get_agent_session(agent_session_id, log_file=None):
+                module.complete_run_from_cli({"run-id": run["id"], "status": "success"})
+                return {"status": "ready"}
+
+            with (
+                mock.patch.object(
+                    module,
+                    "start_agent_session",
+                    return_value={"agentSessionId": "agent-session-1", "provider": "codex"},
+                ),
+                mock.patch.object(module, "open_agent_session"),
+                mock.patch.object(module, "get_agent_session", side_effect=fake_get_agent_session),
+                mock.patch.object(
+                    module,
+                    "latest_agent_summary",
+                    side_effect=RuntimeError("unknown command: agent session messages"),
+                ),
+            ):
+                module.Runner(module.STORE).run(run["id"], automation)
+
+            stored = module.STORE.get_run(run["id"])
+            self.assertEqual(stored["runStatus"], "succeeded")
+            self.assertEqual(stored["taskStatus"], "success")
+            self.assertIsNone(stored["summary"])
+            self.assertIsNone(stored["error"])
+
+
 class RunCompletionTest(unittest.TestCase):
     def test_ready_agent_status_finishes_automation_run(self):
         with tempfile.TemporaryDirectory() as temp_dir:
