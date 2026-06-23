@@ -46,12 +46,12 @@ backend edits source-backed. It packages and watches a separate debug app:
 - package root: `dist/tutti-app/automation-next`
 - import archive: `dist/tutti-app/automation-next.zip`
 - app id: `automation-next`
-- display name: `Automation Task Next`
+- display name: `Automation Next`
 
 Import `dist/tutti-app/automation-next.zip` once from Tutti Desktop App Center.
 Keep `pnpm dev:host:next` running. Frontend edits rebuild into `static/`; refresh
 the app webview after each rebuild. Backend edits run this repo's `server.py`,
-so restart the Automation Task Next app after changing server code.
+so restart the Automation Next app after changing server code.
 
 Use `pnpm dev:host` only when validating the normal `automation` app id. It
 rebuilds `static/` on file changes. If the installed package is a copied archive

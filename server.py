@@ -2333,9 +2333,9 @@ def main():
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     host = os.environ.get("TUTTI_APP_HOST", "127.0.0.1")
     port = int(os.environ["TUTTI_APP_PORT"])
-    print(f"Automation Task listening on {host}:{port}", flush=True)
+    print(f"Automation listening on {host}:{port}", flush=True)
     if os.environ.get("TUTTI_AUTOMATION_STATIC_DIR"):
-        print(f"Automation Task static dir override: {STATIC_DIR}", flush=True)
+        print(f"Automation static dir override: {STATIC_DIR}", flush=True)
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 

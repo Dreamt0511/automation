@@ -1,7 +1,7 @@
 {
   "schemaVersion": "tutti.app.cli.v1",
   "scope": "automation",
-  "description": "Create, run, and review recurring automation tasks.",
+  "description": "Create and schedule automation tasks.",
   "documentation": {
     "file": "COMMANDS.md"
   },
