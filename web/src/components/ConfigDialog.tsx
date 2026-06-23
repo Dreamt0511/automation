@@ -8,8 +8,8 @@ import {
   Spinner,
 } from '@tutti-os/ui-system';
 import { ChevronDown, X } from 'lucide-react';
-import { api } from '../api';
 import { useI18n } from '../i18n';
+import { fetchRunnerOptions } from '../lib/runnerOptionsApi';
 import { PromptRichTextInput } from './PromptRichTextInput';
 import { RunnerSelectMenu } from './RunnerSelectMenu';
 import { TemplateIcon } from './TemplateIcon';
@@ -628,12 +628,6 @@ export function ConfigDialog({
 function providerRequiresModel(provider: string): boolean {
   const normalized = normalizeText(provider).toLowerCase();
   return normalized === 'claude-code' || normalized === 'codex' || normalized === 'gemini';
-}
-
-async function fetchRunnerOptions(provider: string, locale: string): Promise<RunnerOptions> {
-  return api<RunnerOptions>(
-    `/api/runner-options?provider=${encodeURIComponent(provider)}&locale=${encodeURIComponent(locale)}`,
-  );
 }
 
 function isRunnerSelectionReady(

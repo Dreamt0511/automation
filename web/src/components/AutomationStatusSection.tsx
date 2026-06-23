@@ -1,7 +1,8 @@
 import { StatusDot } from '@tutti-os/ui-system';
-import { useMemo, type MouseEvent, type RefObject } from 'react';
+import { useEffect, useMemo, useState, type MouseEvent, type RefObject } from 'react';
 import { useI18n } from '../i18n';
 import { runnerDetailsFromSettings } from '../lib/runnerDetails';
+import { fetchRunnerOptions, runnerOptionsMatchProvider } from '../lib/runnerOptionsApi';
 import { automationScheduleLabel, formatDate } from '../lib/schedule';
 import type { Automation, RunnerOptions } from '../types';
 
@@ -19,9 +20,32 @@ export function AutomationStatusSection({
   onSectionClick,
 }: AutomationStatusSectionProps) {
   const { t, locale } = useI18n();
+  const preferredProvider = String(automation.runnerSettings?.provider ?? '').trim();
+  const [statusRunnerOptions, setStatusRunnerOptions] = useState(runnerOptions);
+
+  useEffect(() => {
+    if (!preferredProvider || runnerOptionsMatchProvider(runnerOptions, preferredProvider)) {
+      setStatusRunnerOptions(runnerOptions);
+      return;
+    }
+
+    let cancelled = false;
+    void fetchRunnerOptions(preferredProvider, locale)
+      .then((options) => {
+        if (!cancelled) setStatusRunnerOptions(options);
+      })
+      .catch(() => {
+        if (!cancelled) setStatusRunnerOptions(runnerOptions);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [automation.id, locale, preferredProvider, runnerOptions]);
+
   const runnerDetails = useMemo(
-    () => runnerDetailsFromSettings(automation, runnerOptions, t),
-    [automation, runnerOptions, t],
+    () => runnerDetailsFromSettings(automation, statusRunnerOptions, t),
+    [automation, statusRunnerOptions, t],
   );
 
   return (

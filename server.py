@@ -914,7 +914,7 @@ def open_manual_agent_session_with_retries(agent_session_id, log_file):
 
 def agent_session_messages(agent_session_id, log_file=None):
     result = run_tutti_cli(
-        ["agent", "session", "messages", "--session-id", agent_session_id, "--limit", "80"],
+        ["agent", "session-summary", "--session-id", agent_session_id, "--limit", "80"],
         timeout=30,
         log_file=log_file,
     )
@@ -935,14 +935,23 @@ def latest_agent_summary_from_messages(messages):
         role = str(message.get("role") or "").strip().lower()
         if role not in {"assistant", "agent"}:
             continue
-        text = extract_message_text(message.get("payload"))
+        text = extract_agent_message_text(message)
         if text:
             return text
     for message in sorted_messages:
-        text = extract_message_text(message.get("payload"))
+        text = extract_agent_message_text(message)
         if text:
             return text
     return None
+
+
+def extract_agent_message_text(message):
+    if not isinstance(message, dict):
+        return None
+    text = extract_message_text(message.get("text"))
+    if text:
+        return text
+    return extract_message_text(message.get("payload"))
 
 
 def extract_message_text(value):
@@ -1595,7 +1604,14 @@ class Runner:
                     if status:
                         break
                     time.sleep(2)
-                summary = latest_agent_summary(agent_session_id, log_file=log_file)
+                try:
+                    summary = latest_agent_summary(agent_session_id, log_file=log_file)
+                except Exception as exc:
+                    if log_file:
+                        log_file.write(
+                            f"[automation] failed to fetch agent summary: {exc}\n".encode("utf-8")
+                        )
+                        log_file.flush()
         except Exception as exc:
             status = "failed"
             error = str(exc)
