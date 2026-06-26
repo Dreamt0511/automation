@@ -751,6 +751,9 @@ AGENT_GET_POLL_LOG_FIELDS = (
     "updatedAt",
     "lastError",
 )
+APPROVAL_REQUIRED_ERROR = (
+    "Agent requested approval; automation runs cannot wait for interactive approval."
+)
 AGENT_GET_LOG_OMIT_FIELDS = (
     "runtimeContext",
     "messages",
@@ -1006,16 +1009,14 @@ def terminal_agent_status(status):
         return "succeeded", None
     if value == "failed":
         return "failed", None
-    if value == "waiting_approval":
-        return (
-            "failed",
-            "Agent requested approval; automation runs cannot wait for interactive approval.",
-        )
+    if value in {"waiting_approval", "awaiting_approval"}:
+        return "failed", APPROVAL_REQUIRED_ERROR
     if value in {"canceled", "cancelled"}:
         return "canceled", "Canceled by user."
     return None, None
 
 
+APPROVAL_TURN_LIFECYCLE_PHASES = {"waiting_approval", "awaiting_approval"}
 ACTIVE_TURN_LIFECYCLE_PHASES = {
     "submitted",
     "running",
@@ -1023,9 +1024,7 @@ ACTIVE_TURN_LIFECYCLE_PHASES = {
     "streaming",
     "in_progress",
     "waiting",
-    "waiting_approval",
     "waiting_input",
-    "awaiting_approval",
 }
 SETTLED_TURN_LIFECYCLE_PHASES = {"settled", "completed", "complete", "finished", "done"}
 FAILED_TURN_LIFECYCLE_OUTCOMES = {"failed", "failure", "error"}
@@ -1042,6 +1041,8 @@ def turn_lifecycle_agent_status(turn_lifecycle):
         return "failed", None, True
     if phase in {"canceled", "cancelled"}:
         return "canceled", "Canceled by user.", True
+    if phase in APPROVAL_TURN_LIFECYCLE_PHASES:
+        return "failed", APPROVAL_REQUIRED_ERROR, True
     if phase in ACTIVE_TURN_LIFECYCLE_PHASES or (
         active_turn_id and phase not in SETTLED_TURN_LIFECYCLE_PHASES
     ):
@@ -1665,15 +1666,19 @@ class Runner:
                         error = "Canceled by user."
                         break
                     session = get_agent_session(agent_session_id, log_file=log_file)
-                    status, error, has_turn_lifecycle = turn_lifecycle_agent_status(
+                    status, error = terminal_agent_status(session.get("status"))
+                    if status in {"failed", "canceled"}:
+                        break
+                    lifecycle_status, lifecycle_error, has_turn_lifecycle = turn_lifecycle_agent_status(
                         session.get("turnLifecycle")
                     )
-                    if status:
+                    if lifecycle_status:
+                        status = lifecycle_status
+                        error = lifecycle_error
                         break
                     if has_turn_lifecycle:
                         time.sleep(2)
                         continue
-                    status, error = terminal_agent_status(session.get("status"))
                     if status:
                         break
                     if initial_agent_status(session.get("status")):

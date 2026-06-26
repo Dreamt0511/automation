@@ -711,6 +711,12 @@ class RunCompletionTest(unittest.TestCase):
                 (None, None, True),
             )
             self.assertEqual(
+                module.turn_lifecycle_agent_status(
+                    {"phase": "waiting_approval", "activeTurnId": "turn-1"}
+                ),
+                ("failed", module.APPROVAL_REQUIRED_ERROR, True),
+            )
+            self.assertEqual(
                 module.turn_lifecycle_agent_status({"phase": "settled", "outcome": "completed"}),
                 ("succeeded", None, True),
             )
@@ -867,6 +873,39 @@ class RunCompletionTest(unittest.TestCase):
             self.assertEqual(stored["runStatus"], "succeeded")
             self.assertEqual(stored["taskStatus"], "success")
             self.assertEqual(stored["summary"], "Done.")
+
+    def test_runner_fails_approval_wait_even_with_active_turn_lifecycle(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            run = make_run(module, "queued", trigger="schedule")
+            automation = module.STORE.get_automation(run["automationId"])
+            polls = []
+
+            def fake_get_agent_session(agent_session_id, log_file=None):
+                polls.append(agent_session_id)
+                return {
+                    "status": "waiting_approval",
+                    "turnLifecycle": {"phase": "waiting", "activeTurnId": "turn-1"},
+                }
+
+            with (
+                mock.patch.object(
+                    module,
+                    "start_agent_session",
+                    return_value={"agentSessionId": "agent-session-1", "provider": "codex"},
+                ),
+                mock.patch.object(module, "open_agent_session"),
+                mock.patch.object(module, "get_agent_session", side_effect=fake_get_agent_session),
+                mock.patch.object(module, "agent_session_messages", return_value=[]),
+                mock.patch.object(module.time, "sleep", return_value=None),
+            ):
+                module.Runner(module.STORE).run(run["id"], automation)
+
+            stored = module.STORE.get_run(run["id"])
+            self.assertEqual(len(polls), 1)
+            self.assertEqual(stored["runStatus"], "failed")
+            self.assertEqual(stored["taskStatus"], "fail")
+            self.assertEqual(stored["error"], module.APPROVAL_REQUIRED_ERROR)
 
     def test_final_run_save_does_not_overwrite_submitted_task_status(self):
         with tempfile.TemporaryDirectory() as temp_dir:
