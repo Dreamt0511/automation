@@ -24,6 +24,11 @@ WORKSPACE_ID = os.environ["TUTTI_WORKSPACE_ID"]
 WORKSPACE_NAME = os.environ.get("TUTTI_WORKSPACE_NAME", WORKSPACE_ID)
 DB_PATH = DATA_DIR / "automation.sqlite3"
 LEGACY_TIMEOUT_SECONDS = 0
+MISSING_TASK_STATUS_ERROR = "Automation task did not submit a task status."
+COMPLETION_GRACE_SECONDS = int(os.environ.get("TUTTI_AUTOMATION_COMPLETION_GRACE_SECONDS", "60") or "60")
+COMPLETION_GRACE_POLL_SECONDS = 0.5
+FINAL_SUMMARY_GRACE_SECONDS = int(os.environ.get("TUTTI_AUTOMATION_FINAL_SUMMARY_GRACE_SECONDS", "10") or "10")
+FINAL_SUMMARY_POLL_SECONDS = 0.5
 PROJECT_MARKERS = ("package.json", "go.mod", "pyproject.toml", "Cargo.toml", ".git")
 RESULT_STATUS_VALUES = {"success", "fail", "skip"}
 DEFAULT_AGENT_PROVIDER = "codex"
@@ -373,16 +378,30 @@ class Store:
             row = self.db.execute("SELECT * FROM runs WHERE id=?", (id_,)).fetchone()
             if not row:
                 raise ValueError(f"run {id_} was not found")
-            if row["status"] not in {"running"}:
-                raise ValueError("run is not accepting completion")
-            self.db.execute(
-                """
-                UPDATE runs
-                SET result_status=?
-                WHERE id=?
-                """,
-                (result_status, id_),
+            is_missing_status_failure = (
+                row["status"] == "failed"
+                and row["error"] == MISSING_TASK_STATUS_ERROR
             )
+            if row["status"] != "running" and not is_missing_status_failure:
+                raise ValueError("run is not accepting completion")
+            if is_missing_status_failure:
+                self.db.execute(
+                    """
+                    UPDATE runs
+                    SET status='succeeded', error=NULL, result_status=?
+                    WHERE id=?
+                    """,
+                    (result_status, id_),
+                )
+            else:
+                self.db.execute(
+                    """
+                    UPDATE runs
+                    SET result_status=?
+                    WHERE id=?
+                    """,
+                    (result_status, id_),
+                )
             self.db.commit()
             return self.get_run(id_)
 
@@ -925,24 +944,76 @@ def latest_agent_summary(agent_session_id, log_file=None):
     return latest_agent_summary_from_messages(agent_session_messages(agent_session_id, log_file=log_file))
 
 
+def wait_for_final_agent_summary(agent_session_id, log_file=None):
+    summary = latest_agent_summary(agent_session_id, log_file=log_file)
+    if summary or FINAL_SUMMARY_GRACE_SECONDS <= 0:
+        return summary
+    if log_file:
+        log_file.write(
+            f"[automation] waiting up to {FINAL_SUMMARY_GRACE_SECONDS}s for final agent summary\n".encode(
+                "utf-8"
+            )
+        )
+        log_file.flush()
+    deadline = time.time() + FINAL_SUMMARY_GRACE_SECONDS
+    while time.time() < deadline:
+        remaining = max(0, deadline - time.time())
+        time.sleep(min(FINAL_SUMMARY_POLL_SECONDS, remaining))
+        summary = latest_agent_summary(agent_session_id, log_file=log_file)
+        if summary:
+            return summary
+    return None
+
+
 def latest_agent_summary_from_messages(messages):
     sorted_messages = sorted(
         [message for message in messages if isinstance(message, dict)],
-        key=lambda message: int(message.get("version") or message.get("id") or 0),
+        key=agent_message_order,
         reverse=True,
     )
+    latest_tool_order = max(
+        (agent_message_order(message) for message in sorted_messages if is_tool_message(message)),
+        default=None,
+    )
     for message in sorted_messages:
+        if latest_tool_order is not None and agent_message_order(message) <= latest_tool_order:
+            continue
         role = str(message.get("role") or "").strip().lower()
         if role not in {"assistant", "agent"}:
+            continue
+        if is_tool_message(message):
             continue
         text = extract_agent_message_text(message)
         if text:
             return text
+    if latest_tool_order is not None:
+        return None
     for message in sorted_messages:
+        if is_tool_message(message):
+            continue
         text = extract_agent_message_text(message)
         if text:
             return text
     return None
+
+
+def agent_message_order(message):
+    for key in ("version", "id"):
+        try:
+            return int(message.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def is_tool_message(message):
+    if not isinstance(message, dict):
+        return False
+    kind = str(message.get("kind") or "").strip().lower()
+    if kind.startswith("tool") or kind in {"function_call", "call"}:
+        return True
+    text = extract_message_text(message.get("text")) or ""
+    return text.strip().lower().startswith("tool_call:")
 
 
 def extract_agent_message_text(message):
@@ -1604,8 +1675,25 @@ class Runner:
                     if status:
                         break
                     time.sleep(2)
+                if status == "succeeded":
+                    latest = self.wait_for_completion_status(
+                        id_,
+                        agent_session_id,
+                        log_file,
+                    )
+                    if latest and latest["runStatus"] == "canceling":
+                        try:
+                            cancel_agent_session(agent_session_id)
+                        except Exception:
+                            pass
+                        status = "canceled"
+                        error = "Canceled by user."
                 try:
-                    summary = latest_agent_summary(agent_session_id, log_file=log_file)
+                    latest_for_summary = self.store.get_run(id_)
+                    if latest_for_summary and latest_for_summary.get("taskStatus"):
+                        summary = wait_for_final_agent_summary(agent_session_id, log_file=log_file)
+                    else:
+                        summary = latest_agent_summary(agent_session_id, log_file=log_file)
                 except Exception as exc:
                     if log_file:
                         log_file.write(
@@ -1623,7 +1711,7 @@ class Runner:
         result_status = latest.get("taskStatus") if latest else None
         if not result_status and status == "succeeded":
             status = "failed"
-            error = "Automation task did not submit a task status."
+            error = MISSING_TASK_STATUS_ERROR
             result_status = "fail"
         if not result_status and status in {"failed", "timed_out"}:
             result_status = "fail"
@@ -1642,6 +1730,25 @@ class Runner:
         self.store.save_run(latest)
         publish_run_finished(latest)
         print(f"run {id_} finished as {status} in {int(time.time() - started)}s", flush=True)
+
+    def wait_for_completion_status(self, id_, agent_session_id, log_file):
+        latest = self.store.get_run(id_)
+        if not latest or latest.get("taskStatus") or COMPLETION_GRACE_SECONDS <= 0:
+            return latest
+        deadline = time.time() + COMPLETION_GRACE_SECONDS
+        log_file.write(
+            f"[automation] waiting up to {COMPLETION_GRACE_SECONDS}s for task status\n".encode("utf-8")
+        )
+        log_file.flush()
+        while time.time() < deadline:
+            latest = self.store.get_run(id_)
+            if not latest:
+                return None
+            if latest["runStatus"] == "canceling" or latest.get("taskStatus"):
+                return latest
+            remaining = max(0, deadline - time.time())
+            time.sleep(min(COMPLETION_GRACE_POLL_SECONDS, remaining))
+        return self.store.get_run(id_)
 
 
 def terminate_process(process):
@@ -1854,7 +1961,10 @@ def complete_run_from_cli(input_):
     result_status = clean_required(input_.get("status"), "status").lower()
     if result_status not in RESULT_STATUS_VALUES:
         raise ValueError("status must be success, fail, or skip")
+    before = STORE.get_run(run_id_value)
     run = STORE.complete_run(run_id_value, result_status)
+    if before and before.get("runStatus") != run.get("runStatus"):
+        publish_run_finished(run)
     return run
 
 
