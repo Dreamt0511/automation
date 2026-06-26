@@ -761,7 +761,18 @@ def tutti_cli_command():
     return configured
 
 
-AGENT_GET_POLL_LOG_FIELDS = ("agentSessionId", "status", "taskStatus", "updatedAt", "lastError")
+AGENT_GET_POLL_LOG_FIELDS = (
+    "agentSessionId",
+    "status",
+    "turnLifecycle",
+    "submitAvailability",
+    "taskStatus",
+    "updatedAt",
+    "lastError",
+)
+APPROVAL_REQUIRED_ERROR = (
+    "Agent requested approval; automation runs cannot wait for interactive approval."
+)
 AGENT_GET_LOG_OMIT_FIELDS = (
     "runtimeContext",
     "messages",
@@ -997,6 +1008,31 @@ def latest_agent_summary_from_messages(messages):
     return None
 
 
+def agent_messages_have_response(messages):
+    sorted_messages = sorted(
+        [message for message in messages if isinstance(message, dict)],
+        key=agent_message_order,
+        reverse=True,
+    )
+    latest_tool_order = max(
+        (agent_message_order(message) for message in sorted_messages if is_tool_message(message)),
+        default=None,
+    )
+    for message in sorted_messages:
+        if latest_tool_order is not None and agent_message_order(message) <= latest_tool_order:
+            continue
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        if role not in {"assistant", "agent"}:
+            continue
+        if is_tool_message(message):
+            continue
+        if extract_agent_message_text(message):
+            return True
+    return False
+
+
 def agent_message_order(message):
     for key in ("version", "id"):
         try:
@@ -1053,18 +1089,61 @@ def extract_message_text(value):
 
 def terminal_agent_status(status):
     value = str(status or "").strip().lower()
-    if value in {"completed", "created", "idle", "ready"}:
+    if value in {"completed", "idle", "ready"}:
         return "succeeded", None
     if value == "failed":
         return "failed", None
-    if value == "waiting_approval":
-        return (
-            "failed",
-            "Agent requested approval; automation runs cannot wait for interactive approval.",
-        )
+    if value in {"waiting_approval", "awaiting_approval"}:
+        return "failed", APPROVAL_REQUIRED_ERROR
     if value in {"canceled", "cancelled"}:
         return "canceled", "Canceled by user."
     return None, None
+
+
+APPROVAL_TURN_LIFECYCLE_PHASES = {"waiting_approval", "awaiting_approval"}
+ACTIVE_TURN_LIFECYCLE_PHASES = {
+    "submitted",
+    "running",
+    "working",
+    "streaming",
+    "in_progress",
+    "waiting",
+    "waiting_input",
+}
+SETTLED_TURN_LIFECYCLE_PHASES = {"settled", "completed", "complete", "finished", "done"}
+FAILED_TURN_LIFECYCLE_OUTCOMES = {"failed", "failure", "error"}
+CANCELED_TURN_LIFECYCLE_OUTCOMES = {"canceled", "cancelled", "interrupted"}
+
+
+def turn_lifecycle_agent_status(turn_lifecycle):
+    if not isinstance(turn_lifecycle, dict):
+        return None, None, False
+
+    phase = clean_optional_string(turn_lifecycle.get("phase")).lower()
+    active_turn_id = clean_optional_string(turn_lifecycle.get("activeTurnId"))
+    if phase in {"failed"}:
+        return "failed", None, True
+    if phase in {"canceled", "cancelled"}:
+        return "canceled", "Canceled by user.", True
+    if phase in APPROVAL_TURN_LIFECYCLE_PHASES:
+        return "failed", APPROVAL_REQUIRED_ERROR, True
+    if phase in ACTIVE_TURN_LIFECYCLE_PHASES or (
+        active_turn_id and phase not in SETTLED_TURN_LIFECYCLE_PHASES
+    ):
+        return None, None, True
+    if phase in SETTLED_TURN_LIFECYCLE_PHASES:
+        outcome = clean_optional_string(turn_lifecycle.get("outcome")).lower()
+        if outcome in FAILED_TURN_LIFECYCLE_OUTCOMES:
+            return "failed", None, True
+        if outcome in CANCELED_TURN_LIFECYCLE_OUTCOMES:
+            return "canceled", "Canceled by user.", True
+        return "succeeded", None, True
+
+    return None, None, False
+
+
+def initial_agent_status(status):
+    return str(status or "").strip().lower() == "created"
 
 
 def clean_env(value):
@@ -1672,8 +1751,30 @@ class Runner:
                         break
                     session = get_agent_session(agent_session_id, log_file=log_file)
                     status, error = terminal_agent_status(session.get("status"))
+                    if status in {"failed", "canceled"}:
+                        break
+                    lifecycle_status, lifecycle_error, has_turn_lifecycle = turn_lifecycle_agent_status(
+                        session.get("turnLifecycle")
+                    )
+                    if lifecycle_status:
+                        status = lifecycle_status
+                        error = lifecycle_error
+                        break
+                    if has_turn_lifecycle:
+                        time.sleep(2)
+                        continue
                     if status:
                         break
+                    if initial_agent_status(session.get("status")):
+                        latest = self.store.get_run(id_)
+                        if latest and latest.get("taskStatus"):
+                            status = "succeeded"
+                            break
+                        messages = agent_session_messages(agent_session_id, log_file=log_file)
+                        if agent_messages_have_response(messages):
+                            summary = latest_agent_summary_from_messages(messages)
+                            status = "succeeded"
+                            break
                     time.sleep(2)
                 if status == "succeeded":
                     latest = self.wait_for_completion_status(
@@ -1691,8 +1792,10 @@ class Runner:
                 try:
                     latest_for_summary = self.store.get_run(id_)
                     if latest_for_summary and latest_for_summary.get("taskStatus"):
-                        summary = wait_for_final_agent_summary(agent_session_id, log_file=log_file)
-                    else:
+                        final_summary = wait_for_final_agent_summary(agent_session_id, log_file=log_file)
+                        if final_summary is not None:
+                            summary = final_summary
+                    elif summary is None:
                         summary = latest_agent_summary(agent_session_id, log_file=log_file)
                 except Exception as exc:
                     if log_file:
