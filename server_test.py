@@ -390,7 +390,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
                     return_value={"agentSessionId": "agent-session-1", "provider": "codex"},
                 ),
                 mock.patch.object(module, "open_agent_session") as open_mock,
-                mock.patch.object(module, "get_agent_session", return_value={"status": "ready"}),
+                mock.patch.object(module, "get_agent_session", return_value={"status": "completed"}),
                 mock.patch.object(module, "agent_session_messages", return_value=[]),
             ):
                 module.Runner(module.STORE).run(run["id"], automation)
@@ -691,13 +691,38 @@ class AgentSessionSummaryTest(unittest.TestCase):
 
 
 class RunCompletionTest(unittest.TestCase):
-    def test_ready_agent_status_finishes_automation_run(self):
+    def test_agent_status_classification_treats_created_as_initial(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
 
             self.assertEqual(module.terminal_agent_status("ready"), ("succeeded", None))
-            self.assertEqual(module.terminal_agent_status("created"), ("succeeded", None))
             self.assertEqual(module.terminal_agent_status("idle"), ("succeeded", None))
+            self.assertEqual(module.terminal_agent_status("created"), (None, None))
+            self.assertTrue(module.initial_agent_status("created"))
+
+    def test_turn_lifecycle_status_classification(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+
+            self.assertEqual(
+                module.turn_lifecycle_agent_status(
+                    {"phase": "running", "activeTurnId": "turn-1"}
+                ),
+                (None, None, True),
+            )
+            self.assertEqual(
+                module.turn_lifecycle_agent_status({"phase": "settled", "outcome": "completed"}),
+                ("succeeded", None, True),
+            )
+            self.assertEqual(
+                module.turn_lifecycle_agent_status({"phase": "settled", "outcome": "failed"}),
+                ("failed", None, True),
+            )
+            self.assertEqual(
+                module.turn_lifecycle_agent_status({"phase": "settled", "outcome": "canceled"}),
+                ("canceled", "Canceled by user.", True),
+            )
+            self.assertEqual(module.turn_lifecycle_agent_status(None), (None, None, False))
 
     def test_complete_run_updates_running_run_task_status(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -739,6 +764,109 @@ class RunCompletionTest(unittest.TestCase):
             stored = module.STORE.get_run(run["id"])
             self.assertEqual(stored["runStatus"], "succeeded")
             self.assertIsNone(stored["taskStatus"])
+
+    def test_runner_ignores_initial_created_status_until_agent_responds(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            run = make_run(module, "queued", trigger="schedule")
+            automation = module.STORE.get_automation(run["automationId"])
+            polls = []
+            message_reads = []
+
+            def fake_get_agent_session(agent_session_id, log_file=None):
+                polls.append(agent_session_id)
+                if len(polls) == 1:
+                    return {"status": "created"}
+                if len(polls) == 2:
+                    return {"status": "running"}
+                module.complete_run_from_cli({"run-id": run["id"], "status": "success"})
+                return {"status": "ready"}
+
+            def fake_agent_session_messages(agent_session_id, log_file=None):
+                message_reads.append(agent_session_id)
+                if len(message_reads) == 1:
+                    return [
+                        {
+                            "role": "user",
+                            "version": 1,
+                            "text": "Review",
+                        }
+                    ]
+                return [
+                    {
+                        "role": "assistant",
+                        "version": 2,
+                        "text": "Done.",
+                    }
+                ]
+
+            with (
+                mock.patch.object(
+                    module,
+                    "start_agent_session",
+                    return_value={"agentSessionId": "agent-session-1", "provider": "codex"},
+                ),
+                mock.patch.object(module, "open_agent_session"),
+                mock.patch.object(module, "get_agent_session", side_effect=fake_get_agent_session),
+                mock.patch.object(module, "agent_session_messages", side_effect=fake_agent_session_messages),
+                mock.patch.object(module.time, "sleep", return_value=None),
+            ):
+                module.Runner(module.STORE).run(run["id"], automation)
+
+            stored = module.STORE.get_run(run["id"])
+            self.assertEqual(len(polls), 3)
+            self.assertEqual(stored["runStatus"], "succeeded")
+            self.assertEqual(stored["taskStatus"], "success")
+            self.assertEqual(stored["summary"], "Done.")
+
+    def test_runner_waits_for_active_turn_lifecycle_before_ready_status(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            run = make_run(module, "queued", trigger="schedule")
+            automation = module.STORE.get_automation(run["automationId"])
+            polls = []
+
+            def fake_get_agent_session(agent_session_id, log_file=None):
+                polls.append(agent_session_id)
+                if len(polls) == 1:
+                    return {
+                        "status": "ready",
+                        "turnLifecycle": {"phase": "running", "activeTurnId": "turn-1"},
+                    }
+                module.complete_run_from_cli({"run-id": run["id"], "status": "success"})
+                return {
+                    "status": "ready",
+                    "turnLifecycle": {"phase": "settled", "outcome": "completed"},
+                }
+
+            with (
+                mock.patch.object(
+                    module,
+                    "start_agent_session",
+                    return_value={"agentSessionId": "agent-session-1", "provider": "codex"},
+                ),
+                mock.patch.object(module, "open_agent_session"),
+                mock.patch.object(module, "get_agent_session", side_effect=fake_get_agent_session),
+                mock.patch.object(
+                    module,
+                    "agent_session_messages",
+                    return_value=[
+                        {
+                            "role": "assistant",
+                            "version": 1,
+                            "text": "Done.",
+                        }
+                    ],
+                ),
+                mock.patch.object(module.time, "sleep", return_value=None),
+            ):
+                module.Runner(module.STORE).run(run["id"], automation)
+
+            stored = module.STORE.get_run(run["id"])
+            self.assertEqual(len(polls), 2)
+            self.assertEqual(stored["runStatus"], "succeeded")
+            self.assertEqual(stored["taskStatus"], "success")
+            self.assertEqual(stored["summary"], "Done.")
 
     def test_final_run_save_does_not_overwrite_submitted_task_status(self):
         with tempfile.TemporaryDirectory() as temp_dir:

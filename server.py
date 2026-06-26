@@ -742,7 +742,15 @@ def tutti_cli_command():
     return configured
 
 
-AGENT_GET_POLL_LOG_FIELDS = ("agentSessionId", "status", "taskStatus", "updatedAt", "lastError")
+AGENT_GET_POLL_LOG_FIELDS = (
+    "agentSessionId",
+    "status",
+    "turnLifecycle",
+    "submitAvailability",
+    "taskStatus",
+    "updatedAt",
+    "lastError",
+)
 AGENT_GET_LOG_OMIT_FIELDS = (
     "runtimeContext",
     "messages",
@@ -945,6 +953,18 @@ def latest_agent_summary_from_messages(messages):
     return None
 
 
+def agent_messages_have_response(messages):
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        if role not in {"assistant", "agent"}:
+            continue
+        if extract_agent_message_text(message):
+            return True
+    return False
+
+
 def extract_agent_message_text(message):
     if not isinstance(message, dict):
         return None
@@ -982,7 +1002,7 @@ def extract_message_text(value):
 
 def terminal_agent_status(status):
     value = str(status or "").strip().lower()
-    if value in {"completed", "created", "idle", "ready"}:
+    if value in {"completed", "idle", "ready"}:
         return "succeeded", None
     if value == "failed":
         return "failed", None
@@ -994,6 +1014,51 @@ def terminal_agent_status(status):
     if value in {"canceled", "cancelled"}:
         return "canceled", "Canceled by user."
     return None, None
+
+
+ACTIVE_TURN_LIFECYCLE_PHASES = {
+    "submitted",
+    "running",
+    "working",
+    "streaming",
+    "in_progress",
+    "waiting",
+    "waiting_approval",
+    "waiting_input",
+    "awaiting_approval",
+}
+SETTLED_TURN_LIFECYCLE_PHASES = {"settled", "completed", "complete", "finished", "done"}
+FAILED_TURN_LIFECYCLE_OUTCOMES = {"failed", "failure", "error"}
+CANCELED_TURN_LIFECYCLE_OUTCOMES = {"canceled", "cancelled", "interrupted"}
+
+
+def turn_lifecycle_agent_status(turn_lifecycle):
+    if not isinstance(turn_lifecycle, dict):
+        return None, None, False
+
+    phase = clean_optional_string(turn_lifecycle.get("phase")).lower()
+    active_turn_id = clean_optional_string(turn_lifecycle.get("activeTurnId"))
+    if phase in {"failed"}:
+        return "failed", None, True
+    if phase in {"canceled", "cancelled"}:
+        return "canceled", "Canceled by user.", True
+    if phase in ACTIVE_TURN_LIFECYCLE_PHASES or (
+        active_turn_id and phase not in SETTLED_TURN_LIFECYCLE_PHASES
+    ):
+        return None, None, True
+    if phase in SETTLED_TURN_LIFECYCLE_PHASES:
+        outcome = clean_optional_string(turn_lifecycle.get("outcome")).lower()
+        if outcome in FAILED_TURN_LIFECYCLE_OUTCOMES:
+            return "failed", None, True
+        if outcome in CANCELED_TURN_LIFECYCLE_OUTCOMES:
+            return "canceled", "Canceled by user.", True
+        return "succeeded", None, True
+
+    return None, None, False
+
+
+def initial_agent_status(status):
+    return str(status or "").strip().lower() == "created"
 
 
 def clean_env(value):
@@ -1600,12 +1665,31 @@ class Runner:
                         error = "Canceled by user."
                         break
                     session = get_agent_session(agent_session_id, log_file=log_file)
+                    status, error, has_turn_lifecycle = turn_lifecycle_agent_status(
+                        session.get("turnLifecycle")
+                    )
+                    if status:
+                        break
+                    if has_turn_lifecycle:
+                        time.sleep(2)
+                        continue
                     status, error = terminal_agent_status(session.get("status"))
                     if status:
                         break
+                    if initial_agent_status(session.get("status")):
+                        latest = self.store.get_run(id_)
+                        if latest and latest.get("taskStatus"):
+                            status = "succeeded"
+                            break
+                        messages = agent_session_messages(agent_session_id, log_file=log_file)
+                        if agent_messages_have_response(messages):
+                            summary = latest_agent_summary_from_messages(messages)
+                            status = "succeeded"
+                            break
                     time.sleep(2)
                 try:
-                    summary = latest_agent_summary(agent_session_id, log_file=log_file)
+                    if summary is None:
+                        summary = latest_agent_summary(agent_session_id, log_file=log_file)
                 except Exception as exc:
                     if log_file:
                         log_file.write(
