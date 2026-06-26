@@ -3,6 +3,8 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -390,7 +392,8 @@ class AgentSessionLaunchTest(unittest.TestCase):
                     return_value={"agentSessionId": "agent-session-1", "provider": "codex"},
                 ),
                 mock.patch.object(module, "open_agent_session") as open_mock,
-                mock.patch.object(module, "get_agent_session", return_value={"status": "completed"}),
+                mock.patch.object(module, "get_agent_session", return_value={"status": "ready"}),
+                mock.patch.object(module, "COMPLETION_GRACE_SECONDS", 0),
                 mock.patch.object(module, "agent_session_messages", return_value=[]),
             ):
                 module.Runner(module.STORE).run(run["id"], automation)
@@ -657,6 +660,111 @@ class AgentSessionSummaryTest(unittest.TestCase):
             )
             self.assertEqual(summary, "All done.")
 
+    def test_latest_agent_summary_uses_assistant_text_after_tool_call(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            summary = module.latest_agent_summary_from_messages(
+                [
+                    {"role": "user", "version": 1, "text": "Do the task."},
+                    {
+                        "kind": "text",
+                        "role": "assistant",
+                        "version": 2,
+                        "text": "I’ll submit the automation run result as success.",
+                    },
+                    {
+                        "kind": "tool_call",
+                        "role": "assistant",
+                        "version": 4,
+                        "text": "tool_call: Bash",
+                    },
+                    {
+                        "kind": "text",
+                        "role": "assistant",
+                        "version": 6,
+                        "text": "All done.",
+                    },
+                ]
+            )
+            self.assertEqual(summary, "All done.")
+
+    def test_latest_agent_summary_ignores_process_text_before_tool_call(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            summary = module.latest_agent_summary_from_messages(
+                [
+                    {"role": "user", "version": 1, "text": "Do the task."},
+                    {
+                        "kind": "text",
+                        "role": "assistant",
+                        "version": 2,
+                        "text": "Understood. I’ll report the status now and then reply.",
+                    },
+                    {
+                        "kind": "tool_call",
+                        "role": "assistant",
+                        "version": 4,
+                        "text": "tool_call: Bash",
+                    },
+                ]
+            )
+            self.assertIsNone(summary)
+
+    def test_wait_for_final_agent_summary_waits_for_text_after_tool_call(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            responses = [
+                [
+                    {
+                        "kind": "text",
+                        "role": "assistant",
+                        "version": 2,
+                        "text": "Understood. I’ll report the status now.",
+                    },
+                    {
+                        "kind": "tool_call",
+                        "role": "assistant",
+                        "version": 4,
+                        "text": "tool_call: Bash",
+                    },
+                ],
+                [
+                    {
+                        "kind": "text",
+                        "role": "assistant",
+                        "version": 2,
+                        "text": "Understood. I’ll report the status now.",
+                    },
+                    {
+                        "kind": "tool_call",
+                        "role": "assistant",
+                        "version": 4,
+                        "text": "tool_call: Bash",
+                    },
+                    {
+                        "kind": "text",
+                        "role": "assistant",
+                        "version": 6,
+                        "text": "Hi.",
+                    },
+                ],
+            ]
+
+            def fake_agent_session_messages(agent_session_id, log_file=None):
+                self.assertEqual(agent_session_id, "agent-session-1")
+                if len(responses) > 1:
+                    return responses.pop(0)
+                return responses[0]
+
+            with (
+                mock.patch.object(module, "agent_session_messages", fake_agent_session_messages),
+                mock.patch.object(module, "FINAL_SUMMARY_GRACE_SECONDS", 1),
+                mock.patch.object(module, "FINAL_SUMMARY_POLL_SECONDS", 0.01),
+            ):
+                summary = module.wait_for_final_agent_summary("agent-session-1")
+
+            self.assertEqual(summary, "Hi.")
+
     def test_run_keeps_success_when_agent_summary_fetch_fails(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
@@ -907,6 +1015,29 @@ class RunCompletionTest(unittest.TestCase):
             self.assertEqual(stored["taskStatus"], "fail")
             self.assertEqual(stored["error"], module.APPROVAL_REQUIRED_ERROR)
 
+    def test_complete_run_repairs_missing_task_status_failure(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            run = make_running_run(module)
+            finished_at = module.now_iso()
+            run["runStatus"] = "failed"
+            run["finishedAt"] = finished_at
+            run["error"] = module.MISSING_TASK_STATUS_ERROR
+            run["taskStatus"] = "fail"
+            module.STORE.save_run(run)
+
+            completed = module.complete_run_from_cli(
+                {
+                    "run-id": run["id"],
+                    "status": "success",
+                }
+            )
+
+            self.assertEqual(completed["runStatus"], "succeeded")
+            self.assertEqual(completed["taskStatus"], "success")
+            self.assertIsNone(completed["error"])
+            self.assertEqual(completed["finishedAt"], finished_at)
+
     def test_final_run_save_does_not_overwrite_submitted_task_status(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
@@ -944,6 +1075,7 @@ class RunCompletionTest(unittest.TestCase):
                 ),
                 mock.patch.object(module, "open_agent_session"),
                 mock.patch.object(module, "get_agent_session", return_value={"status": "ready"}),
+                mock.patch.object(module, "COMPLETION_GRACE_SECONDS", 0),
                 mock.patch.object(
                     module,
                     "agent_session_messages",
@@ -966,6 +1098,66 @@ class RunCompletionTest(unittest.TestCase):
                 stored["error"],
                 "Automation task did not submit a task status.",
             )
+
+    def test_runner_keeps_run_running_until_late_completion_status(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            run = make_run(module, "queued")
+            automation = module.STORE.get_automation(run["automationId"])
+            ready_seen = threading.Event()
+
+            def fake_get_agent_session(agent_session_id, log_file=None):
+                ready_seen.set()
+                return {"status": "ready"}
+
+            with (
+                mock.patch.object(
+                    module,
+                    "start_agent_session",
+                    return_value={"agentSessionId": "agent-session-1", "provider": "codex"},
+                ),
+                mock.patch.object(module, "open_agent_session"),
+                mock.patch.object(module, "get_agent_session", fake_get_agent_session),
+                mock.patch.object(module, "COMPLETION_GRACE_SECONDS", 2),
+                mock.patch.object(module, "COMPLETION_GRACE_POLL_SECONDS", 0.05),
+                mock.patch.object(
+                    module,
+                    "agent_session_messages",
+                    return_value=[
+                        {
+                            "role": "assistant",
+                            "version": 1,
+                            "payload": {"text": "Nothing to do."},
+                        }
+                    ],
+                ),
+            ):
+                thread = threading.Thread(
+                    target=module.Runner(module.STORE).run,
+                    args=(run["id"], automation),
+                )
+                thread.start()
+                self.assertTrue(ready_seen.wait(timeout=5))
+                time.sleep(0.1)
+
+                stored = module.STORE.get_run(run["id"])
+                self.assertEqual(stored["runStatus"], "running")
+                self.assertIsNone(stored["taskStatus"])
+
+                module.complete_run_from_cli(
+                    {
+                        "run-id": run["id"],
+                        "status": "skip",
+                    }
+                )
+                thread.join(timeout=1)
+                self.assertFalse(thread.is_alive())
+
+            stored = module.STORE.get_run(run["id"])
+            self.assertEqual(stored["runStatus"], "succeeded")
+            self.assertEqual(stored["taskStatus"], "skip")
+            self.assertEqual(stored["summary"], "Nothing to do.")
+            self.assertIsNone(stored["error"])
 
     def test_run_prompt_instructs_markdown_final_response_and_completion_command(self):
         with tempfile.TemporaryDirectory() as temp_dir:

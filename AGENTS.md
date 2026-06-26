@@ -18,6 +18,8 @@ This file applies to the whole `automation` repository.
 - Browser UI dev with mock JSB + local API, best default: `pnpm dev:full`
 - Frontend-only dev server: `pnpm dev`
 - Local API server only: `pnpm dev:server`
+- Tutti host local catalog dev loop, recommended for App Center/runtime validation: `pnpm dev:tutti`
+- Repackage the local catalog app after edits: `pnpm dev:tutti:reload`
 - Tutti host static watch for the normal app id: `pnpm dev:host`
 - Tutti host source-backed debug package, recommended for host validation: `pnpm dev:host:next`
 - Build frontend into `static/`: `pnpm build:web`
@@ -39,6 +41,13 @@ Vite proxies `/api` and `/tutti` to the local server. Frontend edits hot reload
 in the browser. `server.py` edits require restarting `pnpm dev:full`. In dev,
 the frontend installs a mock `window.tuttiExternal` only when the host has not
 already injected one.
+
+Use `pnpm dev:tutti` for realistic Tutti Desktop validation through a local App
+Center catalog. It packages the app as a dev version, serves the archive from a
+local HTTP server, writes `dist/tutti-app/dev-catalog.json`, and starts Tutti
+with `TUTTI_APP_CATALOG_FILE` pointing at that catalog. Use
+`pnpm dev:tutti:reload` after frontend or backend edits, then refresh the App
+Center catalog and update/reinstall Automation when prompted.
 
 Use `pnpm dev:host:next` for realistic Tutti Desktop validation while keeping
 backend edits source-backed. It packages and watches a separate debug app:

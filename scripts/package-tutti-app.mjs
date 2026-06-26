@@ -42,13 +42,16 @@ export async function packageTuttiApp(options = {}) {
   const packageRoot = options.packageRoot ?? DEFAULT_PACKAGE_ROOT;
   const archivePath = options.archivePath ?? DEFAULT_ARCHIVE_PATH;
   const variant = options.variant ?? 'default';
-  const manifestOverrides = variant === 'next'
-    ? {
-        appId: 'automation-next',
-        name: 'Automation Next',
-        description: 'Create and schedule automation tasks.',
-      }
-    : null;
+  const manifestOverrides = {
+    ...(variant === 'next'
+      ? {
+          appId: 'automation-next',
+          name: 'Automation Next',
+          description: 'Create and schedule automation tasks.',
+        }
+      : {}),
+    ...(options.version ? { version: String(options.version) } : {}),
+  };
 
   await run('pnpm', ['build:web'], { cwd: repoRoot });
   await rm(packageRoot, { recursive: true, force: true });
@@ -100,11 +103,9 @@ async function copyPlannedFile(repoRoot, packageRoot, sourceRelative, targetRela
   const sourcePath = path.join(repoRoot, sourceRelative);
   const targetPath = path.join(packageRoot, targetRelative);
   await mkdir(path.dirname(targetPath), { recursive: true });
-  if (options.variant === 'next' && targetRelative === 'tutti.app.json') {
+  if (targetRelative === 'tutti.app.json' && Object.keys(options.manifestOverrides ?? {}).length > 0) {
     const manifest = JSON.parse(await readText(sourcePath));
-    manifest.appId = options.manifestOverrides.appId;
-    manifest.name = options.manifestOverrides.name;
-    manifest.description = options.manifestOverrides.description;
+    Object.assign(manifest, options.manifestOverrides);
     await writeJson(targetPath, manifest);
     return;
   }
