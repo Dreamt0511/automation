@@ -553,12 +553,14 @@ body.inbox-open .app-header h1 {
 }
 
 .automation-card.paused:hover .automation-status-badge,
-.automation-card.paused:focus-within .automation-status-badge {
+.automation-card.paused:focus-within .automation-status-badge,
+.automation-card.paused:has(.icon-action[aria-expanded="true"]) .automation-status-badge {
   display: none;
 }
 
 .automation-card.paused:hover .action-buttons,
-.automation-card.paused:focus-within .action-buttons {
+.automation-card.paused:focus-within .action-buttons,
+.automation-card.paused:has(.icon-action[aria-expanded="true"]) .action-buttons {
   display: flex;
 }
 
