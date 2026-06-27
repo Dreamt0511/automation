@@ -1628,6 +1628,22 @@ def publish_run_finished(run):
     )
 
 
+def publish_automation_changed(action, automation=None, automation_id=None):
+    id_ = automation_id
+    if isinstance(automation, dict):
+        id_ = id_ or automation.get("id")
+    id_ = clean_optional_string(id_)
+    if not id_:
+        return
+    RUN_EVENTS.publish(
+        {
+            "type": "automation_changed",
+            "action": action,
+            "automationId": id_,
+        }
+    )
+
+
 class Runner:
     def __init__(self, store):
         self.store = store
@@ -1969,8 +1985,10 @@ SCHEDULER = Scheduler(STORE, RUNNER)
 
 
 def save_automation_and_wake(item):
+    action = "updated" if STORE.get_automation(item.get("id")) else "created"
     saved = STORE.save_automation(item)
     SCHEDULER.wake()
+    publish_automation_changed(action, saved)
     return saved
 
 
@@ -1978,6 +1996,7 @@ def set_automation_enabled_and_wake(id_, enabled):
     item = STORE.set_automation_enabled(id_, enabled)
     if item:
         SCHEDULER.wake()
+        publish_automation_changed("updated", item)
     return item
 
 
@@ -1985,6 +2004,7 @@ def delete_automation_and_wake(id_):
     deleted = STORE.delete_automation(id_)
     if deleted:
         SCHEDULER.wake()
+        publish_automation_changed("deleted", automation_id=id_)
     return deleted
 
 

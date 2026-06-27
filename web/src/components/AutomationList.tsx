@@ -115,7 +115,7 @@ export function AutomationList({
                     {t('status.paused')}
                   </Badge>
                 ) : null}
-                {item.unreviewedRunCount ? (
+                {item.enabled && item.unreviewedRunCount ? (
                   <StatusDot tone="amber" size="sm" ariaLabel={t('aria.hasUpdates')} />
                 ) : null}
                 <div className="action-buttons">

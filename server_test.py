@@ -413,6 +413,36 @@ class RunEventHubTest(unittest.TestCase):
             hub.publish({"type": "run_finished", "runId": "run_1"})
             self.assertTrue(subscriber.empty())
 
+    def test_automation_mutations_publish_change_events(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            subscriber = module.RUN_EVENTS.subscribe()
+            try:
+                automation = module.normalize_automation(
+                    {
+                        "name": "Review",
+                        "prompt": "Review the workspace.",
+                        "cwd": str(Path.cwd()),
+                        "runnerSettings": {"provider": "codex", "model": "gpt-5"},
+                    }
+                )
+
+                saved = module.save_automation_and_wake(automation)
+                created = subscriber.get_nowait()
+
+                self.assertEqual(created["type"], "automation_changed")
+                self.assertEqual(created["action"], "created")
+                self.assertEqual(created["automationId"], saved["id"])
+
+                self.assertTrue(module.delete_automation_and_wake(saved["id"]))
+                deleted = subscriber.get_nowait()
+
+                self.assertEqual(deleted["type"], "automation_changed")
+                self.assertEqual(deleted["action"], "deleted")
+                self.assertEqual(deleted["automationId"], saved["id"])
+            finally:
+                module.RUN_EVENTS.unsubscribe(subscriber)
+
 
 class SchedulerTest(unittest.TestCase):
     def test_scheduler_waits_until_next_scheduled_run(self):
