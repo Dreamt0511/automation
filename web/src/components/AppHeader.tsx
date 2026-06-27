@@ -1,5 +1,5 @@
 import { Button, Spinner } from '@tutti-os/ui-system';
-import { ChevronLeft, Pencil, Rocket, Trash2 } from 'lucide-react';
+import { ChevronLeft, Pencil, Plus, Rocket, Trash2 } from 'lucide-react';
 import { useI18n } from '../i18n';
 import { isAutomationActive } from '../lib/schedule';
 import { runActionLabel } from '../lib/runs';
@@ -85,7 +85,7 @@ export function AppHeader({
       </div>
       {showCreate ? (
         <Button id="createButton" className="primary-action" type="button" onClick={onCreate}>
-          <img src="/assets/create-task.svg" alt="" data-icon="create-task" aria-hidden="true" decoding="async" />
+          <Plus size={16} aria-hidden="true" />
           {t('common.create')}
         </Button>
       ) : null}
