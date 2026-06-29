@@ -103,7 +103,7 @@
           },
           "cron": {
             "type": "string",
-            "description": "Five-field cron expression for cron schedules. Use only with --schedule-type cron. There is no --schedule argument."
+            "description": "Five-field cron expression for cron schedules. Use only with --schedule-type cron."
           },
           "concurrency": {
             "type": "string",
@@ -195,7 +195,7 @@
           },
           "cron": {
             "type": "string",
-            "description": "Five-field cron expression for cron schedules. Use only with --schedule-type cron. There is no --schedule argument."
+            "description": "Five-field cron expression for cron schedules. Use only with --schedule-type cron."
           },
           "concurrency": {
             "type": "string",

@@ -39,7 +39,6 @@ Schedule arguments:
 - `--time-of-day 09:00`
 - `--days-of-week 1,2,3,4,5`
 - `--cron "0 9 * * 1"`
-- There is no `--schedule` argument. Use `--time-of-day` for daily/weekly schedules or `--cron` for cron schedules.
 
 Runner arguments:
 
