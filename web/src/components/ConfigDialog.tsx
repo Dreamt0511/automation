@@ -16,6 +16,7 @@ import { TemplateIcon } from './TemplateIcon';
 import {
   backendScheduleFromDraft,
   defaultScheduleDraft,
+  isValidTimeOfDay,
   scheduleLabelFromDraft,
 } from '../lib/schedule';
 import type { ScheduleDraft } from '../types';
@@ -280,6 +281,14 @@ export function ConfigDialog({
       setFormError(t('form.modelRequired'));
       return;
     }
+    if (
+      scheduleDraft.frequency !== 'hourly' &&
+      scheduleDraft.frequency !== 'custom' &&
+      !isValidTimeOfDay(scheduleDraft.timeOfDay)
+    ) {
+      setFormError(t('form.timeInvalid'));
+      return;
+    }
     setFormError(null);
     const scheduleConfig = backendScheduleFromDraft(scheduleDraft);
     onSave({
@@ -448,7 +457,7 @@ export function ConfigDialog({
                         ))}
                       </div>
                     </div>
-                    {scheduleDraft.frequency !== 'hourly' ? (
+                    {scheduleDraft.frequency !== 'hourly' && scheduleDraft.frequency !== 'custom' ? (
                       <label className="schedule-time-field">
                         <span className="schedule-section-label">{t('form.time')}</span>
                         <input
@@ -626,8 +635,12 @@ export function ConfigDialog({
 }
 
 function providerRequiresModel(provider: string): boolean {
-  const normalized = normalizeText(provider).toLowerCase();
-  return normalized === 'claude-code' || normalized === 'codex' || normalized === 'gemini';
+  void provider;
+  return false;
+}
+
+function providerAllowsDefaultModel(provider: string): boolean {
+  return Boolean(normalizeText(provider));
 }
 
 function isRunnerSelectionReady(
@@ -638,6 +651,7 @@ function isRunnerSelectionReady(
 ): boolean {
   if (isLoading || !runnerOptions.available) return false;
   if (normalizeText(runnerOptions.provider) !== normalizeText(provider)) return false;
+  if (providerAllowsDefaultModel(provider) && !normalizeText(model)) return true;
   if (!providerRequiresModel(provider)) return true;
   const normalizedModel = normalizeText(model);
   if (!normalizedModel) return false;

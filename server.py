@@ -32,8 +32,9 @@ FINAL_SUMMARY_POLL_SECONDS = 0.5
 PROJECT_MARKERS = ("package.json", "go.mod", "pyproject.toml", "Cargo.toml", ".git")
 RESULT_STATUS_VALUES = {"success", "fail", "skip"}
 DEFAULT_AGENT_PROVIDER = "codex"
-AUTOMATION_SUPPORTED_AGENT_PROVIDERS = {"claude-code", "codex", "gemini"}
-MODEL_SUPPORTING_AGENT_PROVIDERS = {"claude-code", "codex", "gemini"}
+AUTOMATION_SUPPORTED_AGENT_PROVIDERS = {"claude-code", "codex"}
+MODEL_SUPPORTING_AGENT_PROVIDERS = {"claude-code", "codex"}
+MODEL_OPTIONAL_AGENT_PROVIDERS = {"claude-code", "codex"}
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -497,9 +498,9 @@ def decode_runner_settings(settings_json, args_json=None):
 def normalize_automation(payload, existing=None):
     stamp = now_iso()
     schedule_type = clean_choice(
-        payload.get("scheduleType", existing["scheduleType"] if existing else "manual"),
-        {"manual", "interval", "daily", "weekly", "cron"},
-        "manual",
+        payload.get("scheduleType", existing["scheduleType"] if existing else "daily"),
+        {"interval", "daily", "weekly", "cron"},
+        "daily",
     )
     item = {
         "id": existing["id"] if existing else automation_id(),
@@ -530,29 +531,43 @@ def normalize_automation(payload, existing=None):
 
 
 def provider_requires_model(provider):
-    return normalize_provider_id(provider) in MODEL_SUPPORTING_AGENT_PROVIDERS
+    provider = normalize_provider_id(provider)
+    return provider in MODEL_SUPPORTING_AGENT_PROVIDERS and provider not in MODEL_OPTIONAL_AGENT_PROVIDERS
 
 
 def validate_runner_settings_for_automation(runner_settings):
     if not isinstance(runner_settings, dict):
-        raise ValueError("model is required for the selected agent provider")
-    provider = clean_provider(runner_settings.get("provider"))
+        raise ValueError("provider is required for automation runner settings")
+    provider = normalize_provider_id(runner_settings.get("provider"))
+    if not provider:
+        raise ValueError("provider is required for automation runner settings")
+    if provider not in AUTOMATION_SUPPORTED_AGENT_PROVIDERS:
+        raise ValueError(f"unsupported automation agent provider: {provider}")
     if provider_requires_model(provider) and not clean_optional_string(runner_settings.get("model")):
         raise ValueError("model is required for the selected agent provider")
+
+
+def default_cli_runner_provider():
+    providers_payload = agent_providers_payload()
+    providers = providers_payload.get("providers") or []
+    if not providers:
+        raise ValueError(
+            "no available automation agent providers. Run `tutti agent providers --json` to check provider setup."
+        )
+    return default_provider_from_list(providers, providers_payload.get("defaultProvider"))
 
 
 def normalize_runner_settings(value, existing=None, runner_args=None):
     value = value if isinstance(value, dict) else {}
     existing = existing if isinstance(existing, dict) else {}
     parsed_args = parse_runner_args(clean_string_list(runner_args or []))
-    provider = clean_provider(
-        value.get("provider") or existing.get("provider") or DEFAULT_AGENT_PROVIDER
+    provider = normalize_provider_id(value.get("provider") or existing.get("provider"))
+    model = clean_optional_string(
+        value.get("model") or existing.get("model") or parsed_args.get("model")
     )
     return {
         "provider": provider,
-        "model": clean_optional_string(
-            value.get("model") or existing.get("model") or parsed_args.get("model")
-        ),
+        "model": model,
         "reasoningEffort": clean_optional_string(
             value.get("reasoningEffort")
             or existing.get("reasoningEffort")
@@ -598,19 +613,19 @@ def normalize_schedule(schedule_type, value):
     if schedule_type == "interval":
         return {"intervalMinutes": clean_int(value.get("intervalMinutes", 60), 1, 60 * 24 * 30)}
     if schedule_type == "daily":
-        return {"timeOfDay": clean_time(value.get("timeOfDay", "09:00"))}
+        return {"timeOfDay": clean_time(value.get("timeOfDay"))}
     if schedule_type == "weekly":
         return {
-            "timeOfDay": clean_time(value.get("timeOfDay", "09:00")),
+            "timeOfDay": clean_time(value.get("timeOfDay")),
             "daysOfWeek": clean_days(value.get("daysOfWeek", [1])),
         }
     if schedule_type == "cron":
-        return {"expression": clean_required(value.get("expression", "0 9 * * *"), "cron expression")}
+        return {"expression": clean_required(value.get("expression"), "cron expression")}
     return {}
 
 
 def compute_next_run(item, after):
-    if not item["enabled"] or item["scheduleType"] == "manual":
+    if not item["enabled"]:
         return None
     schedule = item["schedule"]
     if item["scheduleType"] == "interval":
@@ -1158,13 +1173,17 @@ def clean_env(value):
 
 
 def clean_time(value):
-    value = str(value or "09:00").strip()
-    parts = value.split(":")
-    if len(parts) != 2:
+    if value is None:
         return "09:00"
-    hour, minute = int(parts[0]), int(parts[1])
+    value = str(value).strip()
+    if not value:
+        raise ValueError("time-of-day must be HH:MM")
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", value)
+    if not match:
+        raise ValueError("time-of-day must be HH:MM")
+    hour, minute = int(match.group(1)), int(match.group(2))
     if hour < 0 or hour > 23 or minute < 0 or minute > 59:
-        return "09:00"
+        raise ValueError("time-of-day must be HH:MM")
     return f"{hour:02d}:{minute:02d}"
 
 
@@ -2092,7 +2111,7 @@ def complete_run_from_cli(input_):
 
 
 def schedule_label(item):
-    schedule_type = item.get("scheduleType") or "manual"
+    schedule_type = item.get("scheduleType") or "daily"
     schedule = item.get("schedule") if isinstance(item.get("schedule"), dict) else {}
     if schedule_type == "interval":
         return f"every {schedule.get('intervalMinutes', '')}m"
@@ -2103,7 +2122,7 @@ def schedule_label(item):
         return f"weekly {days} {schedule.get('timeOfDay', '')}".strip()
     if schedule_type == "cron":
         return f"cron {schedule.get('expression', '')}".strip()
-    return "manual"
+    return "daily 09:00"
 
 
 def resolve_cli_automation(input_):
@@ -2181,6 +2200,8 @@ def automation_payload_from_cli(input_, existing=None):
     ):
         if cli_key in input_:
             runner_settings[settings_key] = input_[cli_key]
+    if not existing and not normalize_provider_id(runner_settings.get("provider")):
+        runner_settings["provider"] = default_cli_runner_provider()
     if runner_settings:
         payload["runnerSettings"] = runner_settings
     if "runner-args" in input_:
@@ -2194,8 +2215,6 @@ def cli_schedule_type(input_, payload):
     if cli_has(input_, "schedule-type"):
         return str(input_.get("schedule-type")).strip()
     current = str(payload.get("scheduleType") or "").strip()
-    if current:
-        return current
     if cli_has(input_, "cron"):
         return "cron"
     if cli_has(input_, "interval-minutes"):
@@ -2203,12 +2222,24 @@ def cli_schedule_type(input_, payload):
     if cli_has(input_, "days-of-week"):
         return "weekly"
     if cli_has(input_, "time-of-day"):
+        if current in {"daily", "weekly"}:
+            return current
         return "daily"
-    return "manual"
+    if current:
+        return current
+    return "daily"
 
 
 def cli_schedule(input_, schedule_type, existing=None):
     schedule = dict(existing) if isinstance(existing, dict) else {}
+    schedule_keys = {"interval-minutes", "time-of-day", "days-of-week", "cron"}
+    provided_schedule_keys = {key for key in schedule_keys if key in input_}
+    if schedule_type == "cron":
+        incompatible = sorted(provided_schedule_keys - {"cron"})
+        if incompatible:
+            raise ValueError("cron schedules must use --cron, not --time-of-day, --days-of-week, or --interval-minutes")
+    elif "cron" in provided_schedule_keys:
+        raise ValueError("--cron cannot be used with a non-cron schedule type")
     if "interval-minutes" in input_:
         schedule["intervalMinutes"] = input_["interval-minutes"]
     if "time-of-day" in input_:
@@ -2227,7 +2258,7 @@ def cli_schedule(input_, schedule_type, existing=None):
             "daysOfWeek": schedule.get("daysOfWeek", [1]),
         }
     if schedule_type == "cron":
-        return {"expression": schedule.get("expression", "0 9 * * *")}
+        return {"expression": clean_required(schedule.get("expression"), "cron expression")}
     return {}
 
 

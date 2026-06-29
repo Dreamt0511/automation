@@ -261,19 +261,192 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
             self.assertEqual([item["id"] for item in payload["models"]], ["default"])
             self.assertEqual(payload["currentModel"], "default")
 
-    def test_normalize_automation_requires_model_for_supported_providers(self):
+    def test_normalize_automation_requires_provider(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
-            with self.assertRaisesRegex(ValueError, "model is required"):
+            with self.assertRaisesRegex(ValueError, "provider is required"):
                 module.normalize_automation(
                     {
                         "name": "Review",
                         "prompt": "Review the workspace.",
                         "cwd": str(Path.cwd()),
-                        "runnerSettings": {"provider": "claude-code"},
+                        "runnerSettings": {},
                         "runnerArgs": [],
                     }
                 )
+
+    def test_normalize_automation_allows_codex_default_model(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            item = module.normalize_automation(
+                {
+                    "name": "Review",
+                    "prompt": "Review the workspace.",
+                    "cwd": str(Path.cwd()),
+                    "runnerSettings": {"provider": "codex"},
+                    "runnerArgs": [],
+                }
+            )
+
+            self.assertEqual(item["runnerSettings"]["provider"], "codex")
+            self.assertEqual(item["runnerSettings"]["model"], "")
+
+    def test_normalize_automation_allows_claude_code_default_model(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            item = module.normalize_automation(
+                {
+                    "name": "Review",
+                    "prompt": "Review the workspace.",
+                    "cwd": str(Path.cwd()),
+                    "runnerSettings": {"provider": "claude-code"},
+                    "runnerArgs": [],
+                }
+            )
+
+            self.assertEqual(item["runnerSettings"]["provider"], "claude-code")
+            self.assertEqual(item["runnerSettings"]["model"], "")
+
+    def test_normalize_automation_rejects_unsupported_provider(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            with self.assertRaisesRegex(ValueError, "unsupported automation agent provider: gemini"):
+                module.normalize_automation(
+                    {
+                        "name": "Review",
+                        "prompt": "Review the workspace.",
+                        "cwd": str(Path.cwd()),
+                        "runnerSettings": {"provider": "gemini"},
+                        "runnerArgs": [],
+                    }
+                )
+
+
+class ScheduleNormalizationTest(unittest.TestCase):
+    def test_daily_time_of_day_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            item = module.normalize_automation(
+                {
+                    "name": "Review",
+                    "prompt": "Review the workspace.",
+                    "cwd": str(Path.cwd()),
+                    "scheduleType": "daily",
+                    "schedule": {"timeOfDay": "17:30"},
+                    "runnerSettings": {"provider": "codex", "model": "gpt-5"},
+                    "runnerArgs": [],
+                }
+            )
+
+            self.assertEqual(item["schedule"], {"timeOfDay": "17:30"})
+
+    def test_invalid_time_of_day_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            with self.assertRaisesRegex(ValueError, "time-of-day must be HH:MM"):
+                module.normalize_automation(
+                    {
+                        "name": "Review",
+                        "prompt": "Review the workspace.",
+                        "cwd": str(Path.cwd()),
+                        "scheduleType": "daily",
+                        "schedule": {"timeOfDay": "25:00"},
+                        "runnerSettings": {"provider": "codex", "model": "gpt-5"},
+                        "runnerArgs": [],
+                    }
+                )
+
+    def test_cron_expression_is_preserved_from_cli(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            payload = module.automation_payload_from_cli(
+                {
+                    "name": "Review",
+                    "prompt": "Review the workspace.",
+                    "cron": "30 17 * * 1-5",
+                    "provider": "codex",
+                    "model": "gpt-5",
+                }
+            )
+            item = module.normalize_automation(payload)
+
+            self.assertEqual(item["scheduleType"], "cron")
+            self.assertEqual(item["schedule"], {"expression": "30 17 * * 1-5"})
+
+    def test_cron_schedule_requires_cron_expression_from_cli(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            with self.assertRaisesRegex(ValueError, "cron expression is required"):
+                module.automation_payload_from_cli(
+                    {
+                        "name": "Review",
+                        "prompt": "Review the workspace.",
+                        "schedule-type": "cron",
+                        "provider": "codex",
+                        "model": "gpt-5",
+                    }
+                )
+
+    def test_cron_schedule_rejects_time_of_day_from_cli(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            with self.assertRaisesRegex(ValueError, "cron schedules must use --cron"):
+                module.automation_payload_from_cli(
+                    {
+                        "name": "Review",
+                        "prompt": "Review the workspace.",
+                        "schedule-type": "cron",
+                        "time-of-day": "17:30",
+                        "provider": "codex",
+                        "model": "gpt-5",
+                    }
+                )
+
+    def test_cli_defaults_to_ui_schedule_when_schedule_arguments_are_omitted(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            payload = module.automation_payload_from_cli(
+                {
+                    "name": "Review",
+                    "prompt": "Review the workspace.",
+                    "schedule": "30 12 * * *",
+                    "provider": "codex",
+                    "model": "gpt-5",
+                }
+            )
+            item = module.normalize_automation(payload)
+
+            self.assertEqual(item["scheduleType"], "daily")
+            self.assertEqual(item["schedule"], {"timeOfDay": "09:00"})
+
+    def test_cli_create_defaults_provider_from_host_options(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+
+            def fake_run_tutti_cli(args, timeout=None):
+                if args == ["agent", "providers"]:
+                    return {
+                        "defaultProvider": "claude-code",
+                        "providers": [
+                            {"provider": "codex", "status": "ready"},
+                            {"provider": "claude-code", "status": "ready"},
+                        ],
+                    }
+                raise AssertionError(f"unexpected CLI args: {args!r}")
+
+            with mock.patch.object(module, "run_tutti_cli", fake_run_tutti_cli):
+                item = module.normalize_automation(
+                    module.automation_payload_from_cli(
+                        {
+                            "name": "Review",
+                            "prompt": "Review the workspace.",
+                            "model": "gpt-5",
+                        }
+                    )
+                )
+
+            self.assertEqual(item["runnerSettings"]["provider"], "claude-code")
+            self.assertEqual(item["runnerSettings"]["model"], "gpt-5")
 
 
 class AgentSessionLaunchTest(unittest.TestCase):
@@ -1221,8 +1394,8 @@ def make_run(module, run_status, trigger="manual"):
                 "prompt": "Review",
                 "cwd": str(Path.cwd()),
                 "enabled": False,
-                "scheduleType": "manual",
-                "schedule": {},
+                "scheduleType": "daily",
+                "schedule": {"timeOfDay": "09:00"},
                 "concurrency": "queue",
                 "runnerSettings": {"provider": "codex", "model": "gpt-5"},
                 "runnerArgs": [],
