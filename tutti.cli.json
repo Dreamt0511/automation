@@ -85,35 +85,39 @@
           },
           "schedule-type": {
             "type": "string",
-            "description": "Schedule type: manual, interval, daily, weekly, or cron."
+            "description": "Schedule type. Use daily with --time-of-day, weekly with --days-of-week and --time-of-day, or cron with --cron.",
+            "enum": ["interval", "daily", "weekly", "cron"],
+            "default": "daily"
           },
           "interval-minutes": {
             "type": "integer",
-            "description": "Interval schedule in minutes."
+            "description": "Interval schedule in minutes. Use only with --schedule-type interval."
           },
           "time-of-day": {
             "type": "string",
-            "description": "Daily or weekly run time in HH:MM."
+            "description": "Daily or weekly run time in HH:MM. Use only with --schedule-type daily or weekly."
           },
           "days-of-week": {
             "type": "string",
-            "description": "Comma-separated ISO weekdays for weekly schedules, 1=Monday through 7=Sunday."
+            "description": "Comma-separated ISO weekdays for weekly schedules, 1=Monday through 7=Sunday. Use only with --schedule-type weekly."
           },
           "cron": {
             "type": "string",
-            "description": "Five-field cron expression for cron schedules."
+            "description": "Five-field cron expression for cron schedules. Use only with --schedule-type cron. There is no --schedule argument."
           },
           "concurrency": {
             "type": "string",
-            "description": "Concurrent run policy: skip, queue, or replace."
+            "description": "Concurrent run policy: skip, queue, or replace.",
+            "enum": ["skip", "queue", "replace"],
+            "default": "queue"
           },
           "provider": {
             "type": "string",
-            "description": "Agent provider id, such as codex, claude-code, or gemini."
+            "description": "Agent provider id. Omit to use the host default provider. Discover values with `tutti agent providers --json`."
           },
           "model": {
             "type": "string",
-            "description": "Runner model id."
+            "description": "Runner model id. Optional when the selected host provider supports its CLI default. Discover provider options with `tutti agent composer-options --provider <provider-id> --json`."
           },
           "reasoning-effort": {
             "type": "string",
@@ -174,35 +178,37 @@
           },
           "schedule-type": {
             "type": "string",
-            "description": "Schedule type: manual, interval, daily, weekly, or cron."
+            "description": "Schedule type. Use daily with --time-of-day, weekly with --days-of-week and --time-of-day, or cron with --cron.",
+            "enum": ["interval", "daily", "weekly", "cron"]
           },
           "interval-minutes": {
             "type": "integer",
-            "description": "Interval schedule in minutes."
+            "description": "Interval schedule in minutes. Use only with --schedule-type interval."
           },
           "time-of-day": {
             "type": "string",
-            "description": "Daily or weekly run time in HH:MM."
+            "description": "Daily or weekly run time in HH:MM. Use only with --schedule-type daily or weekly."
           },
           "days-of-week": {
             "type": "string",
-            "description": "Comma-separated ISO weekdays for weekly schedules, 1=Monday through 7=Sunday."
+            "description": "Comma-separated ISO weekdays for weekly schedules, 1=Monday through 7=Sunday. Use only with --schedule-type weekly."
           },
           "cron": {
             "type": "string",
-            "description": "Five-field cron expression for cron schedules."
+            "description": "Five-field cron expression for cron schedules. Use only with --schedule-type cron. There is no --schedule argument."
           },
           "concurrency": {
             "type": "string",
-            "description": "Concurrent run policy: skip, queue, or replace."
+            "description": "Concurrent run policy: skip, queue, or replace.",
+            "enum": ["skip", "queue", "replace"]
           },
           "provider": {
             "type": "string",
-            "description": "Agent provider id, such as codex, claude-code, or gemini."
+            "description": "Agent provider id. Discover values with `tutti agent providers --json`."
           },
           "model": {
             "type": "string",
-            "description": "Runner model id."
+            "description": "Runner model id. Optional when the selected host provider supports its CLI default. Discover provider options with `tutti agent composer-options --provider <provider-id> --json`."
           },
           "reasoning-effort": {
             "type": "string",

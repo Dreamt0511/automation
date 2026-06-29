@@ -43,6 +43,15 @@ export function normalizeTimeOfDay(value: unknown): string {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
+export function isValidTimeOfDay(value: unknown): boolean {
+  const text = String(value ?? '').trim();
+  const match = text.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return false;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
+}
+
 export function normalizeDaysOfWeek(value: unknown): number[] {
   if (!Array.isArray(value) || value.length === 0) return [1];
   return [...new Set(value.map((day) => Number(day)).filter((day) => day >= 1 && day <= 7))].sort(
@@ -89,14 +98,14 @@ export function backendScheduleFromDraft(draft: ScheduleDraft): {
     return { scheduleType: 'interval', schedule: { intervalMinutes: 60 } };
   }
   if (draft.frequency === 'daily') {
-    return { scheduleType: 'daily', schedule: { timeOfDay: normalizeTimeOfDay(draft.timeOfDay) } };
+    return { scheduleType: 'daily', schedule: { timeOfDay: draft.timeOfDay.trim() } };
   }
   if (draft.frequency === 'weekdays') {
     return {
       scheduleType: 'weekly',
       schedule: {
         daysOfWeek: [1, 2, 3, 4, 5],
-        timeOfDay: normalizeTimeOfDay(draft.timeOfDay),
+        timeOfDay: draft.timeOfDay.trim(),
       },
     };
   }
@@ -105,7 +114,7 @@ export function backendScheduleFromDraft(draft: ScheduleDraft): {
       scheduleType: 'weekly',
       schedule: {
         daysOfWeek: normalizeDaysOfWeek(draft.daysOfWeek),
-        timeOfDay: normalizeTimeOfDay(draft.timeOfDay),
+        timeOfDay: draft.timeOfDay.trim(),
       },
     };
   }
@@ -120,7 +129,6 @@ export function automationScheduleLabel(
   t: (key: string, params?: Record<string, string | number>) => string,
   locale?: string,
 ): string {
-  if (item.scheduleType === 'manual') return t('schedule.manual');
   return scheduleLabelFromDraft(scheduleDraftFromAutomation(item), t, locale);
 }
 
@@ -139,7 +147,7 @@ export function scheduleLabelFromDraft(
     });
   }
   if (draft.frequency === 'custom') {
-    return t('schedule.custom');
+    return t('schedule.custom', { expression: draft.cronExpression });
   }
   return t('schedule.frequencyAt', {
     frequency: t(`schedule.frequency.${draft.frequency}`),

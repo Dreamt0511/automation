@@ -27,26 +27,33 @@ Examples:
 
 ```sh
 tutti automation create --name "Daily review" --prompt "Review today's changes"
-tutti automation create --name "Hourly triage" --prompt "Triage open issues" --schedule-type interval --interval-minutes 60
-tutti automation create --name "Weekday report" --prompt "Write a status report" --schedule-type weekly --days-of-week 1,2,3,4,5 --time-of-day 09:00
+tutti automation create --name "Hourly triage" --prompt "Triage open issues" --provider codex --schedule-type interval --interval-minutes 60
+tutti automation create --name "Weekday report" --prompt "Write a status report" --provider claude-code --schedule-type weekly --days-of-week 1,2,3,4,5 --time-of-day 09:00
 ```
 
 Schedule arguments:
 
-- `--schedule-type manual|interval|daily|weekly|cron`
+- `--schedule-type interval|daily|weekly|cron`
+- Omit schedule arguments to use the UI default schedule: daily at 09:00.
 - `--interval-minutes 60`
 - `--time-of-day 09:00`
 - `--days-of-week 1,2,3,4,5`
 - `--cron "0 9 * * 1"`
+- There is no `--schedule` argument. Use `--time-of-day` for daily/weekly schedules or `--cron` for cron schedules.
 
 Runner arguments:
 
-- `--provider codex`
-- `--model gpt-5`
+- `--provider <provider-id>` is optional when creating a task. Omit it to use the host default provider.
+- Discover provider values with `tutti agent providers --json`. Use an available or ready provider supported by Automation, such as `codex` or `claude-code`.
+- `--model <model-id>` is optional when the selected host provider supports its CLI default. Discover provider options with `tutti agent composer-options --provider <provider-id> --json`.
 - `--reasoning-effort high`
 - `--permission-mode full-access`
-- `--runner-args "--model gpt-5"`
+- `--runner-args "--model <model-id>"`
 - `--env KEY=value,OTHER=value`
+
+Automation app tasks must be persisted with `tutti automation` commands. Do not
+substitute provider-native cron/reminder tools, OS cron/launchd, shell sleep
+loops, or background scripts when the user asked to create an Automation task.
 
 ### `tutti automation update`
 
