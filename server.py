@@ -29,12 +29,16 @@ COMPLETION_GRACE_SECONDS = int(os.environ.get("TUTTI_AUTOMATION_COMPLETION_GRACE
 COMPLETION_GRACE_POLL_SECONDS = 0.5
 FINAL_SUMMARY_GRACE_SECONDS = int(os.environ.get("TUTTI_AUTOMATION_FINAL_SUMMARY_GRACE_SECONDS", "10") or "10")
 FINAL_SUMMARY_POLL_SECONDS = 0.5
+RUN_TIMEOUT_SECONDS = int(os.environ.get("TUTTI_AUTOMATION_RUN_TIMEOUT_SECONDS", "1800") or "1800")
 PROJECT_MARKERS = ("package.json", "go.mod", "pyproject.toml", "Cargo.toml", ".git")
 RESULT_STATUS_VALUES = {"success", "fail", "skip"}
 DEFAULT_AGENT_PROVIDER = "codex"
 AUTOMATION_SUPPORTED_AGENT_PROVIDERS = {"claude-code", "codex"}
 MODEL_SUPPORTING_AGENT_PROVIDERS = {"claude-code", "codex"}
 MODEL_OPTIONAL_AGENT_PROVIDERS = {"claude-code", "codex"}
+RUNNER_OPTIONS_COMPOSER_TIMEOUT_SECONDS = float(
+    os.environ.get("TUTTI_AUTOMATION_RUNNER_OPTIONS_COMPOSER_TIMEOUT_SECONDS", "8") or "8"
+)
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -1157,6 +1161,14 @@ def turn_lifecycle_agent_status(turn_lifecycle):
     return None, None, False
 
 
+def run_has_timed_out(started_at, timeout_seconds):
+    return timeout_seconds > 0 and time.time() - started_at >= timeout_seconds
+
+
+def run_timeout_error(timeout_seconds):
+    return f"Automation run timed out after {timeout_seconds} seconds."
+
+
 def initial_agent_status(status):
     return str(status or "").strip().lower() == "created"
 
@@ -1217,6 +1229,7 @@ def runner_options_payload(provider=None, locale=None):
         "currentReasoningLevel": options["currentReasoningLevel"],
         "permissionMode": options["permissionMode"],
         "permissionConfig": options["permissionConfig"],
+        "optionsUnavailable": bool(options.get("optionsUnavailable")),
     }
 
 
@@ -1309,7 +1322,10 @@ def agent_composer_options_payload(provider, locale=None):
     locale = normalize_locale(locale)
     if locale:
         args.extend(["--locale", locale])
-    result = run_tutti_cli(args, timeout=60)
+    try:
+        result = run_tutti_cli(args, timeout=RUNNER_OPTIONS_COMPOSER_TIMEOUT_SECONDS)
+    except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return fallback_agent_composer_options(provider)
     effective_settings = (
         result.get("effectiveSettings")
         if isinstance(result.get("effectiveSettings"), dict)
@@ -1347,6 +1363,17 @@ def agent_composer_options_payload(provider, locale=None):
         "permissionConfig": normalize_permission_config(
             result.get("permissionConfig")
         ),
+    }
+
+
+def fallback_agent_composer_options(_provider):
+    return {
+        "optionsUnavailable": True,
+        "models": [],
+        "currentModel": "",
+        "currentReasoningLevel": "",
+        "permissionMode": "",
+        "permissionConfig": {"configurable": False, "modes": []},
     }
 
 
@@ -1763,6 +1790,7 @@ class Runner:
         status = None
         error = None
         summary = None
+        timeout_seconds = RUN_TIMEOUT_SECONDS
         try:
             with log_path.open("ab") as log_file:
                 session = start_agent_session(automation, run, log_file)
@@ -1783,6 +1811,19 @@ class Runner:
                             pass
                         status = "canceled"
                         error = "Canceled by user."
+                        break
+                    if run_has_timed_out(started, timeout_seconds):
+                        try:
+                            cancel_agent_session(agent_session_id)
+                        except Exception as exc:
+                            log_file.write(
+                                f"[automation] failed to cancel timed-out agent session: {exc}\n".encode(
+                                    "utf-8"
+                                )
+                            )
+                            log_file.flush()
+                        status = "timed_out"
+                        error = run_timeout_error(timeout_seconds)
                         break
                     session = get_agent_session(agent_session_id, log_file=log_file)
                     status, error = terminal_agent_status(session.get("status"))

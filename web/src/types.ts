@@ -108,6 +108,7 @@ export type RunnerOptions = {
   defaultProvider?: string;
   currentModel?: string;
   currentReasoningLevel?: string;
+  optionsUnavailable?: boolean;
   permissionMode?: string;
   models?: RunnerModel[];
   providers?: RunnerProvider[];

@@ -67,6 +67,7 @@
   "loading.runnerOptions": "Loading agent options",
   "loading.runs": "Loading runs",
   "form.runnerOptionsUnavailable": "Agent options are unavailable. Try again after the agent provider is ready.",
+  "form.runnerOptionsDegraded": "Model and review options could not be loaded. Try again after the agent provider is ready.",
   "form.modelsUnavailable": "Model list could not be loaded for this provider. Check that the agent runtime is ready, then try switching provider or reopening this dialog.",
   "request.failed": "Request failed",
   "result.empty": "No result captured.",
