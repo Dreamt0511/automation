@@ -257,6 +257,10 @@ export function ConfigDialog({
     providerRequiresModel(provider) &&
     modelOptions.length === 0 &&
     !normalizeText(dialogRunnerOptions.currentModel);
+  const runnerOptionsDegraded =
+    !isRunnerOptionsLoading &&
+    dialogRunnerOptions.available &&
+    Boolean(dialogRunnerOptions.optionsUnavailable);
 
   const submit = () => {
     const trimmedName = name.trim();
@@ -275,6 +279,10 @@ export function ConfigDialog({
     }
     if (!dialogRunnerOptions.available) {
       setFormError(t('form.runnerOptionsUnavailable'));
+      return;
+    }
+    if (dialogRunnerOptions.optionsUnavailable) {
+      setFormError(t('form.runnerOptionsDegraded'));
       return;
     }
     if (!runnerSelectionReady) {
@@ -573,6 +581,12 @@ export function ConfigDialog({
                       </div>
                     ) : null}
 
+                    {runnerOptionsDegraded ? (
+                      <div className="runner-options-unavailable" role="status">
+                        {t('form.runnerOptionsDegraded')}
+                      </div>
+                    ) : null}
+
                     {reasoningOptions.length > 0 ? (
                       <RunnerSelectMenu
                         className="runner-select-tool"
@@ -650,6 +664,7 @@ function isRunnerSelectionReady(
   isLoading: boolean,
 ): boolean {
   if (isLoading || !runnerOptions.available) return false;
+  if (runnerOptions.optionsUnavailable) return false;
   if (normalizeText(runnerOptions.provider) !== normalizeText(provider)) return false;
   if (providerAllowsDefaultModel(provider) && !normalizeText(model)) return true;
   if (!providerRequiresModel(provider)) return true;

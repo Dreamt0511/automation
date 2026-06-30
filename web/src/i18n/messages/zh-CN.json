@@ -67,6 +67,7 @@
   "loading.runnerOptions": "正在加载 Agent 选项",
   "loading.runs": "正在加载运行记录",
   "form.runnerOptionsUnavailable": "Agent 选项不可用，请确认 Agent 提供方就绪后重试。",
+  "form.runnerOptionsDegraded": "未能加载模型和审核选项，请确认 Agent 提供方就绪后重试。",
   "form.modelsUnavailable": "未能加载该提供方的模型列表。请确认 Agent 运行时已就绪，然后尝试切换提供方或重新打开此对话框。",
   "request.failed": "请求失败",
   "result.empty": "暂无结果。",

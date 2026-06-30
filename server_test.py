@@ -173,6 +173,45 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
             self.assertEqual([item["id"] for item in payload["models"]], ["gpt-5", "gpt-5.1"])
             self.assertEqual(payload["currentModel"], "gpt-5")
 
+    def test_runner_options_falls_back_when_composer_options_times_out(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            timeouts = []
+
+            def fake_run_tutti_cli(args, timeout=30, log_file=None):
+                if args == ["agent", "providers"]:
+                    return {
+                        "defaultProvider": "codex",
+                        "providers": [
+                            {"provider": "codex", "status": "ready"},
+                            {"provider": "claude-code", "status": "ready"},
+                        ],
+                    }
+                if args[:4] == ["agent", "composer-options", "--provider", "codex"]:
+                    timeouts.append(timeout)
+                    raise subprocess.TimeoutExpired(cmd=args, timeout=timeout)
+                raise AssertionError(f"unexpected CLI args: {args!r}")
+
+            with mock.patch.object(module, "run_tutti_cli", fake_run_tutti_cli):
+                payload = module.runner_options_payload(provider="codex", locale="en")
+
+            self.assertEqual(timeouts, [module.RUNNER_OPTIONS_COMPOSER_TIMEOUT_SECONDS])
+            self.assertTrue(payload["available"])
+            self.assertEqual(payload["provider"], "codex")
+            self.assertTrue(payload["optionsUnavailable"])
+            self.assertEqual(payload["models"], [])
+            self.assertEqual(payload["currentModel"], "")
+
+    def test_runner_options_fallback_does_not_invent_claude_model(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+
+            payload = module.fallback_agent_composer_options("claude-code")
+
+            self.assertTrue(payload["optionsUnavailable"])
+            self.assertEqual(payload["models"], [])
+            self.assertEqual(payload["currentModel"], "")
+
     def test_runner_options_prefers_runtime_context_over_model_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
@@ -1217,6 +1256,43 @@ class RunCompletionTest(unittest.TestCase):
             self.assertEqual(stored["runStatus"], "failed")
             self.assertEqual(stored["taskStatus"], "fail")
             self.assertEqual(stored["error"], module.APPROVAL_REQUIRED_ERROR)
+
+    def test_runner_times_out_active_turn_and_cancels_agent_session(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            run = make_run(module, "queued", trigger="schedule")
+            automation = module.STORE.get_automation(run["automationId"])
+            polls = []
+
+            def fake_get_agent_session(agent_session_id, log_file=None):
+                polls.append(agent_session_id)
+                return {
+                    "status": "running",
+                    "turnLifecycle": {"phase": "running", "activeTurnId": "turn-1"},
+                }
+
+            with (
+                mock.patch.object(
+                    module,
+                    "start_agent_session",
+                    return_value={"agentSessionId": "agent-session-1", "provider": "codex"},
+                ),
+                mock.patch.object(module, "open_agent_session"),
+                mock.patch.object(module, "get_agent_session", side_effect=fake_get_agent_session),
+                mock.patch.object(module, "cancel_agent_session") as cancel_mock,
+                mock.patch.object(module, "RUN_TIMEOUT_SECONDS", 1),
+                mock.patch.object(module, "run_has_timed_out", side_effect=[False, True]),
+                mock.patch.object(module, "latest_agent_summary", return_value=None),
+                mock.patch.object(module.time, "sleep", return_value=None),
+            ):
+                module.Runner(module.STORE).run(run["id"], automation)
+
+            stored = module.STORE.get_run(run["id"])
+            self.assertEqual(polls, ["agent-session-1"])
+            cancel_mock.assert_called_once_with("agent-session-1")
+            self.assertEqual(stored["runStatus"], "timed_out")
+            self.assertEqual(stored["taskStatus"], "fail")
+            self.assertEqual(stored["error"], module.run_timeout_error(1))
 
     def test_complete_run_repairs_missing_task_status_failure(self):
         with tempfile.TemporaryDirectory() as temp_dir:
