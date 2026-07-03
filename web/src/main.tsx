@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@tutti-os/ui-system/styles.css';
+import '@tutti-os/ui-rich-text/at-panel/index.css';
 import { App } from './App';
 import { AppLocaleProvider } from './i18n';
 import { installTuttiExternalPageDiagnostics } from './lib/tuttiExternalLogs';

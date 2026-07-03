@@ -1,5 +1,8 @@
 import { useMemo } from 'react';
-import { RichTextTriggerEditor } from '@tutti-os/ui-rich-text/editor';
+import {
+  RichTextTriggerEditor,
+  type RichTextTriggerEditorProps,
+} from '@tutti-os/ui-rich-text/editor';
 import type { RichTextTriggerProvider } from '@tutti-os/ui-rich-text/types';
 import { createTuttiExternalAgentContextMentionProviders } from '../lib/tuttiExternal';
 import { useI18n } from '../i18n';
@@ -24,13 +27,39 @@ export function PromptRichTextInput({
     () => createTuttiExternalAgentContextMentionProviders(),
     [],
   );
+  const palette = useMemo<NonNullable<RichTextTriggerEditorProps['palette']>>(
+    () => ({
+      categories: [
+        {
+          id: 'apps',
+          label: t('form.promptMentionAppsTab'),
+          providerIds: ['workspace-app'],
+        },
+        {
+          id: 'agents',
+          label: t('form.promptMentionAgentsTab'),
+          providerIds: ['agent-target'],
+        },
+      ],
+      defaultCategoryId: 'agents',
+      labels: {
+        tabHint: t('form.promptMentionTabHint'),
+        cycleFilter: t('form.promptMentionCycleFilter'),
+        moveSelection: t('form.promptMentionMoveSelection'),
+        empty: t('form.promptMentionEmpty'),
+        listbox: t('form.promptMentionListbox'),
+      },
+      maxHeightPx: 360,
+    }),
+    [t],
+  );
 
   return (
     <RichTextTriggerEditor
       className="prompt-rich-text-field"
-      maxResults={30}
       menuZIndex="var(--z-dialog-popover)"
       minQueryLength={0}
+      palette={palette}
       placeholder={value.trim() ? '' : placeholder}
       placeholderClassName="prompt-rich-text-placeholder"
       textareaClassName="prompt-input prompt-rich-text-editor"

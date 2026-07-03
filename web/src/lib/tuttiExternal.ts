@@ -34,13 +34,13 @@ declare global {
   }
 }
 
-const atProviderIds = [
-  // 'file',
-  // 'workspace-issue',
+export const agentContextMentionProviderIds = [
   'workspace-app',
-  // 'agent-session',
-  // 'agent-generated-file',
+  'agent-target',
 ] as const satisfies readonly AgentContextMentionProviderId[];
+
+const mentionResolveProviderIds = agentContextMentionProviderIds;
+const defaultMentionMaxResults = 30;
 
 function normalizeMentionPresentation(
   item: AutomationTuttiExternalAtQueryResult,
@@ -82,7 +82,7 @@ function normalizeAtInsertResult(
 }
 
 async function resolveAtMention(
-  providerId: AgentContextMentionProviderId,
+  providerIds: readonly AgentContextMentionProviderId[],
   identity: RichTextMentionIdentity,
 ): Promise<{ label: string; presentation?: AutomationTuttiExternalMentionPresentation } | null> {
   const bridge = window.tuttiExternal?.at;
@@ -94,11 +94,13 @@ async function resolveAtMention(
     const items = await bridge.query({
       keyword: '',
       maxResults: 100,
-      providers: [providerId],
+      providers: providerIds,
     });
     const item = items.find(
       (candidate) =>
-        candidate.providerId === providerId && candidate.itemId === identity.entityId,
+        providerIds.includes(candidate.providerId) &&
+        candidate.providerId === identity.providerId &&
+        candidate.itemId === identity.entityId,
     );
     if (!item || item.insert.kind !== 'mention') {
       return null;
@@ -119,7 +121,7 @@ async function resolveAtMention(
 }
 
 export function createTuttiExternalAgentContextMentionProviders(): readonly AgentContextMentionProvider<AutomationTuttiExternalAtQueryResult>[] {
-  return atProviderIds.map((providerId) => ({
+  return agentContextMentionProviderIds.map((providerId) => ({
     id: providerId,
     trigger: '@',
     async query(input) {
@@ -130,11 +132,10 @@ export function createTuttiExternalAgentContextMentionProviders(): readonly Agen
       try {
         const items = await bridge.query({
           keyword: input.keyword,
-          maxResults: input.maxResults,
+          maxResults: input.maxResults ?? defaultMentionMaxResults,
           providers: [providerId],
         });
-        const filtered = items.filter((item) => item.providerId === providerId);
-        return filtered;
+        return items.filter((item) => item.providerId === providerId);
       } catch (error) {
         return [];
       }
@@ -142,8 +143,11 @@ export function createTuttiExternalAgentContextMentionProviders(): readonly Agen
     getItemKey: (item) => `${item.providerId}:${item.itemId}`,
     getItemLabel: (item) => item.label,
     getItemSubtitle: (item) => item.subtitle,
-    getItemThumbnailUrl: (item) => item.thumbnailUrl,
+    getItemIconUrl: (item) =>
+      item.insert.kind === 'mention'
+        ? item.insert.mention.presentation?.iconUrl ?? item.thumbnailUrl
+        : item.thumbnailUrl,
     toInsertResult: (item) => normalizeAtInsertResult(item),
-    resolveMention: (identity) => resolveAtMention(providerId, identity),
+    resolveMention: (identity) => resolveAtMention(mentionResolveProviderIds, identity),
   }));
 }

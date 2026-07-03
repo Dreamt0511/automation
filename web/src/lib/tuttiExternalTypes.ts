@@ -4,11 +4,18 @@ import type { RichTextTriggerProvider } from '@tutti-os/ui-rich-text/types';
 export type AgentContextMentionProviderId = TuttiExternalAtProviderId;
 
 export type AutomationTuttiExternalMentionPresentation = {
+  agentProviderId?: string;
+  agentIconUrl?: string;
   iconUrl?: string;
   thumbnailUrl?: string;
   subtitle?: string;
   description?: string;
+  participant?: string;
   status?: string;
+  statusDataStatus?: string;
+  statusLabel?: string;
+  statusPulse?: string;
+  userAvatarPlaceholderUrl?: string;
 };
 
 export type AutomationTuttiExternalAtInsertResult =
@@ -46,7 +53,7 @@ export type AgentContextMentionProvider<TItem = unknown> = Omit<
 > & {
   trigger: '@';
   toInsertResult: (item: TItem) => AutomationTuttiExternalAtInsertResult;
-  getItemThumbnailUrl?: (
+  getItemIconUrl?: (
     item: TItem,
   ) => string | null | undefined | Promise<string | null | undefined>;
 };

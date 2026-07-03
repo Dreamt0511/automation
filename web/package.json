@@ -10,9 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tutti-os/ui-rich-text": "0.0.13",
-    "@tutti-os/ui-system": "0.0.39",
-    "@tutti-os/workspace-external-core": "0.0.13",
+    "@tutti-os/ui-rich-text": "0.0.54",
+    "@tutti-os/ui-system": "0.0.54",
+    "@tutti-os/workspace-external-core": "0.0.54",
     "dompurify": "^3.3.1",
     "lucide-react": "^0.562.0",
     "react": "^19.2.4",

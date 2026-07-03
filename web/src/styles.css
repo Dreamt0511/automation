@@ -1638,7 +1638,29 @@ body.inbox-open .app-header h1 {
   display: none;
 }
 
-.tutti-rich-text-at-menu button {
+.tutti-rich-text-at-menu:has(.rich-text-at-mention-palette) {
+  width: min(34rem, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 24px));
+  overflow: hidden;
+  padding: 0;
+  --rich-text-at-mention-bg: var(--background-fronted);
+  --rich-text-at-mention-text-primary: var(--text-primary);
+  --rich-text-at-mention-text-secondary: var(--text-secondary);
+  --rich-text-at-mention-text-tertiary: var(--text-tertiary);
+  --rich-text-at-mention-line-1: var(--line-1);
+  --rich-text-at-mention-line-2: var(--line-2);
+  --rich-text-at-mention-hover: var(--transparency-block);
+  --rich-text-at-mention-active: var(--transparency-hover);
+  --rich-text-at-mention-accent: var(--tutti-purple);
+}
+
+.tutti-rich-text-at-menu:has(.rich-text-at-mention-palette) .rich-text-at-mention-palette {
+  width: 100%;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.tutti-rich-text-at-menu:not(:has(.rich-text-at-mention-palette)) button {
   display: flex;
   width: 100%;
   cursor: pointer;
@@ -1654,12 +1676,12 @@ body.inbox-open .app-header h1 {
   outline: 0;
 }
 
-.tutti-rich-text-at-menu button:hover,
-.tutti-rich-text-at-menu button[aria-selected="true"] {
+.tutti-rich-text-at-menu:not(:has(.rich-text-at-mention-palette)) button:hover,
+.tutti-rich-text-at-menu:not(:has(.rich-text-at-mention-palette)) button[aria-selected="true"] {
   background: var(--transparency-block);
 }
 
-.tutti-rich-text-at-menu [data-rich-text-trigger-thumbnail] {
+.tutti-rich-text-at-menu:not(:has(.rich-text-at-mention-palette)) [data-rich-text-trigger-thumbnail] {
   display: inline-grid;
   width: 16px;
   height: 16px;
@@ -1670,7 +1692,7 @@ body.inbox-open .app-header h1 {
   background: var(--transparency-block);
 }
 
-.tutti-rich-text-at-menu [data-rich-text-trigger-thumbnail] img {
+.tutti-rich-text-at-menu:not(:has(.rich-text-at-mention-palette)) [data-rich-text-trigger-thumbnail] img {
   display: block;
   width: 100%;
   height: 100%;
@@ -1678,15 +1700,15 @@ body.inbox-open .app-header h1 {
   object-position: center;
 }
 
-.tutti-rich-text-at-menu .tutti-rich-text-at-menu-item__label,
-.tutti-rich-text-at-menu button > div:first-child {
+.tutti-rich-text-at-menu:not(:has(.rich-text-at-mention-palette)) .tutti-rich-text-at-menu-item__label,
+.tutti-rich-text-at-menu:not(:has(.rich-text-at-mention-palette)) button > div:first-child {
   font-size: 13px;
   font-weight: 600;
   line-height: 20px;
 }
 
-.tutti-rich-text-at-menu .tutti-rich-text-at-menu-item__subtitle,
-.tutti-rich-text-at-menu button > div + div {
+.tutti-rich-text-at-menu:not(:has(.rich-text-at-mention-palette)) .tutti-rich-text-at-menu-item__subtitle,
+.tutti-rich-text-at-menu:not(:has(.rich-text-at-mention-palette)) button > div + div {
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 16px;
