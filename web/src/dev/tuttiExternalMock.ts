@@ -69,6 +69,50 @@ const fixtureItems: readonly AutomationTuttiExternalAtQueryResult[] = [
       },
     },
   },
+  {
+    providerId: 'agent-target',
+    itemId: 'codex',
+    label: 'Codex',
+    subtitle: 'Agent target',
+    insert: {
+      kind: 'mention',
+      mention: {
+        entityId: 'codex',
+        label: 'Codex',
+        scope: {
+          workspaceId: devWorkspaceId,
+          providerId: 'codex',
+        },
+        presentation: {
+          agentProviderId: 'codex',
+          subtitle: 'Agent target',
+          description: 'Start a Codex agent session',
+        },
+      },
+    },
+  },
+  {
+    providerId: 'agent-target',
+    itemId: 'claude-code',
+    label: 'Claude Code',
+    subtitle: 'Agent target',
+    insert: {
+      kind: 'mention',
+      mention: {
+        entityId: 'claude-code',
+        label: 'Claude Code',
+        scope: {
+          workspaceId: devWorkspaceId,
+          providerId: 'claude-code',
+        },
+        presentation: {
+          agentProviderId: 'claude-code',
+          subtitle: 'Agent target',
+          description: 'Start a Claude Code agent session',
+        },
+      },
+    },
+  },
   // {
   //   providerId: 'agent-session',
   //   itemId: 'session-7',
