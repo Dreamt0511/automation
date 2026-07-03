@@ -40,7 +40,16 @@ export const agentContextMentionProviderIds = [
 ] as const satisfies readonly AgentContextMentionProviderId[];
 
 const mentionResolveProviderIds = agentContextMentionProviderIds;
+const agentContextMentionProviderIdSet: ReadonlySet<AgentContextMentionProviderId> = new Set(
+  agentContextMentionProviderIds,
+);
 const defaultMentionMaxResults = 30;
+
+function isAgentContextMentionProviderId(
+  value: string,
+): value is (typeof agentContextMentionProviderIds)[number] {
+  return agentContextMentionProviderIdSet.has(value as AgentContextMentionProviderId);
+}
 
 function normalizeMentionPresentation(
   item: AutomationTuttiExternalAtQueryResult,
@@ -91,10 +100,15 @@ async function resolveAtMention(
   }
 
   try {
+    const queryProviderIds =
+      isAgentContextMentionProviderId(identity.providerId) &&
+      providerIds.includes(identity.providerId)
+        ? [identity.providerId]
+        : providerIds;
     const items = await bridge.query({
       keyword: '',
       maxResults: 100,
-      providers: providerIds,
+      providers: queryProviderIds,
     });
     const item = items.find(
       (candidate) =>
