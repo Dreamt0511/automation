@@ -511,7 +511,10 @@ def normalize_automation(payload, existing=None):
         "name": clean_required(payload.get("name"), "name"),
         "prompt": clean_required(payload.get("prompt"), "prompt"),
         "cwd": clean_cwd(payload.get("cwd") or (existing["cwd"] if existing else "")),
-        "enabled": bool(payload.get("enabled", existing["enabled"] if existing else True)),
+        "enabled": clean_bool(
+            payload.get("enabled", existing["enabled"] if existing else True),
+            existing["enabled"] if existing else True,
+        ),
         "scheduleType": schedule_type,
         "schedule": normalize_schedule(schedule_type, payload.get("schedule", {})),
         "concurrency": clean_choice(
@@ -763,6 +766,19 @@ def clean_int(value, minimum, maximum):
     return max(minimum, min(maximum, value))
 
 
+def clean_bool(value, default=False):
+    if value in (None, ""):
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError("boolean value must be true or false")
+
+
 def clean_string_list(value):
     if not isinstance(value, list):
         return []
@@ -770,7 +786,22 @@ def clean_string_list(value):
 
 
 def without_duplicate_runner_flags(args, flags):
-    return [arg for arg in args if arg not in flags]
+    result = []
+    index = 0
+    while index < len(args):
+        arg = str(args[index] or "").strip()
+        if not arg:
+            index += 1
+            continue
+        name = arg.split("=", 1)[0]
+        if name in flags:
+            index += 1
+            if "=" not in arg and index < len(args) and not str(args[index]).startswith("-"):
+                index += 1
+            continue
+        result.append(arg)
+        index += 1
+    return result
 
 
 def tutti_cli_command():
@@ -883,18 +914,25 @@ def run_tutti_cli(args, timeout=60, log_file=None):
     return json.loads(result.stdout)
 
 
+def provider_start_command(provider):
+    provider = normalize_provider_id(provider)
+    if provider == "codex":
+        return ["codex", "start"]
+    if provider == "claude-code":
+        return ["claude", "start"]
+    raise ValueError(f"unsupported automation agent provider: {provider}")
+
+
 def start_agent_session(automation, run, log_file):
     title = automation["name"] or "Automation Task"
+    runner_args = clean_string_list(automation.get("runnerArgs"))
     settings = normalize_runner_settings(
         automation.get("runnerSettings"),
         None,
-        automation.get("runnerArgs"),
+        runner_args,
     )
     args = [
-        "agent",
-        "start",
-        "--provider",
-        settings["provider"],
+        *provider_start_command(settings["provider"]),
         "--cwd",
         run["cwd"],
         "--title",
@@ -914,6 +952,27 @@ def start_agent_session(automation, run, log_file):
         args.extend(["--reasoning-effort", settings["reasoningEffort"]])
     if settings.get("permissionMode"):
         args.extend(["--permission-mode", settings["permissionMode"]])
+    duplicate_flags = {
+        "--provider",
+        "--cwd",
+        "--title",
+        "--prompt",
+        "--display-prompt",
+        "--show",
+        "--visible",
+    }
+    if settings.get("model"):
+        duplicate_flags.update({"--model", "-m"})
+    if settings.get("reasoningEffort"):
+        duplicate_flags.update({"--reasoning-effort", "--config", "-c"})
+    if settings.get("permissionMode"):
+        duplicate_flags.add("--permission-mode")
+    args.extend(
+        without_duplicate_runner_flags(
+            runner_args,
+            duplicate_flags,
+        )
+    )
     return run_tutti_cli(
         args,
         timeout=60,
