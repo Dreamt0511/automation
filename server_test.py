@@ -487,6 +487,22 @@ class ScheduleNormalizationTest(unittest.TestCase):
             self.assertEqual(item["runnerSettings"]["provider"], "claude-code")
             self.assertEqual(item["runnerSettings"]["model"], "gpt-5")
 
+    def test_cli_enabled_false_string_disables_automation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            item = module.normalize_automation(
+                module.automation_payload_from_cli(
+                    {
+                        "name": "Review",
+                        "prompt": "Review the workspace.",
+                        "enabled": "false",
+                        "provider": "codex",
+                    }
+                )
+            )
+
+            self.assertFalse(item["enabled"])
+
 
 class AgentSessionLaunchTest(unittest.TestCase):
     def test_manual_run_starts_agent_session_with_show_for_gui_activation(self):
@@ -516,6 +532,8 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 session = module.start_agent_session(automation, run, log_file=None)
 
             self.assertEqual(session["agentSessionId"], "agent-session-1")
+            self.assertEqual(calls[0][:2], ["codex", "start"])
+            self.assertNotIn("--provider", calls[0])
             self.assertEqual(calls[0][calls[0].index("--title") + 1], "Review")
             self.assertEqual(
                 calls[0][calls[0].index("--display-prompt") + 1],
@@ -551,6 +569,8 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 session = module.start_agent_session(automation, run, log_file=None)
 
             self.assertEqual(session["agentSessionId"], "agent-session-1")
+            self.assertEqual(calls[0][:2], ["codex", "start"])
+            self.assertNotIn("--provider", calls[0])
             self.assertEqual(calls[0][calls[0].index("--title") + 1], "Review")
             self.assertEqual(
                 calls[0][calls[0].index("--display-prompt") + 1],
@@ -558,6 +578,99 @@ class AgentSessionLaunchTest(unittest.TestCase):
             )
             self.assertIn("--visible", calls[0])
             self.assertNotIn("--show", calls[0])
+
+    def test_claude_code_run_uses_provider_start_command(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            calls = []
+
+            def fake_run_tutti_cli(args, timeout=30, log_file=None):
+                calls.append(args)
+                return {"session": {"agentSessionId": "agent-session-1", "provider": "claude-code"}}
+
+            automation = {
+                "name": "Review",
+                "prompt": "Review the workspace.",
+                "runnerSettings": {"provider": "claude-code"},
+                "runnerArgs": [],
+            }
+            run = {
+                "id": "run_123",
+                "trigger": "manual",
+                "prompt": "Review the workspace.",
+                "cwd": str(Path.cwd()),
+                "artifactDir": str(Path(temp_dir) / "artifacts"),
+            }
+
+            with mock.patch.object(module, "run_tutti_cli", fake_run_tutti_cli):
+                session = module.start_agent_session(automation, run, log_file=None)
+
+            self.assertEqual(session["agentSessionId"], "agent-session-1")
+            self.assertEqual(calls[0][:2], ["claude", "start"])
+            self.assertNotIn("--provider", calls[0])
+
+    def test_runner_args_are_forwarded_without_duplicate_structured_flags(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            calls = []
+
+            def fake_run_tutti_cli(args, timeout=30, log_file=None):
+                calls.append(args)
+                return {"session": {"agentSessionId": "agent-session-1", "provider": "codex"}}
+
+            automation = {
+                "name": "Review",
+                "prompt": "Review the workspace.",
+                "runnerSettings": {"provider": "codex", "model": "gpt-5", "reasoningEffort": "high"},
+                "runnerArgs": ["--model", "gpt-4", "--speed", "fast", "--reasoning-effort=low"],
+            }
+            run = {
+                "id": "run_123",
+                "trigger": "schedule",
+                "prompt": "Review the workspace.",
+                "cwd": str(Path.cwd()),
+                "artifactDir": str(Path(temp_dir) / "artifacts"),
+            }
+
+            with mock.patch.object(module, "run_tutti_cli", fake_run_tutti_cli):
+                module.start_agent_session(automation, run, log_file=None)
+
+            self.assertEqual(calls[0].count("--model"), 1)
+            self.assertEqual(calls[0][calls[0].index("--model") + 1], "gpt-5")
+            self.assertEqual(calls[0].count("--reasoning-effort"), 1)
+            self.assertIn("--speed", calls[0])
+            self.assertIn("fast", calls[0])
+
+    def test_runner_args_keep_supported_flags_when_not_set_structurally(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            calls = []
+
+            def fake_run_tutti_cli(args, timeout=30, log_file=None):
+                calls.append(args)
+                return {"session": {"agentSessionId": "agent-session-1", "provider": "codex"}}
+
+            automation = {
+                "name": "Review",
+                "prompt": "Review the workspace.",
+                "runnerSettings": {"provider": "codex"},
+                "runnerArgs": ["--reasoning-effort", "high", "--permission-mode", "full-access"],
+            }
+            run = {
+                "id": "run_123",
+                "trigger": "schedule",
+                "prompt": "Review the workspace.",
+                "cwd": str(Path.cwd()),
+                "artifactDir": str(Path(temp_dir) / "artifacts"),
+            }
+
+            with mock.patch.object(module, "run_tutti_cli", fake_run_tutti_cli):
+                module.start_agent_session(automation, run, log_file=None)
+
+            self.assertIn("--reasoning-effort", calls[0])
+            self.assertIn("high", calls[0])
+            self.assertIn("--permission-mode", calls[0])
+            self.assertIn("full-access", calls[0])
 
     def test_manual_runner_reopens_created_agent_session_after_persisting_it(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -838,7 +951,7 @@ class AgentGetLogCompactionTest(unittest.TestCase):
             with tempfile.NamedTemporaryFile(mode="w+b") as log_file:
                 with mock.patch.object(module.subprocess, "run", return_value=completed):
                     module.run_tutti_cli(
-                        ["agent", "start", "--provider", "codex"],
+                        ["codex", "start", "--prompt", "Review"],
                         log_file=log_file,
                     )
                 log_file.seek(0)
