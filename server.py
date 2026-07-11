@@ -32,10 +32,6 @@ FINAL_SUMMARY_POLL_SECONDS = 0.5
 RUN_TIMEOUT_SECONDS = int(os.environ.get("TUTTI_AUTOMATION_RUN_TIMEOUT_SECONDS", "1800") or "1800")
 PROJECT_MARKERS = ("package.json", "go.mod", "pyproject.toml", "Cargo.toml", ".git")
 RESULT_STATUS_VALUES = {"success", "fail", "skip"}
-DEFAULT_AGENT_PROVIDER = "codex"
-AUTOMATION_SUPPORTED_AGENT_PROVIDERS = {"claude-code", "codex"}
-MODEL_SUPPORTING_AGENT_PROVIDERS = {"claude-code", "codex"}
-MODEL_OPTIONAL_AGENT_PROVIDERS = {"claude-code", "codex"}
 RUNNER_OPTIONS_COMPOSER_TIMEOUT_SECONDS = float(
     os.environ.get("TUTTI_AUTOMATION_RUNNER_OPTIONS_COMPOSER_TIMEOUT_SECONDS", "8") or "8"
 )
@@ -537,21 +533,12 @@ def normalize_automation(payload, existing=None):
     return item
 
 
-def provider_requires_model(provider):
-    provider = normalize_provider_id(provider)
-    return provider in MODEL_SUPPORTING_AGENT_PROVIDERS and provider not in MODEL_OPTIONAL_AGENT_PROVIDERS
-
-
 def validate_runner_settings_for_automation(runner_settings):
     if not isinstance(runner_settings, dict):
         raise ValueError("provider is required for automation runner settings")
     provider = normalize_provider_id(runner_settings.get("provider"))
     if not provider:
         raise ValueError("provider is required for automation runner settings")
-    if provider not in AUTOMATION_SUPPORTED_AGENT_PROVIDERS:
-        raise ValueError(f"unsupported automation agent provider: {provider}")
-    if provider_requires_model(provider) and not clean_optional_string(runner_settings.get("model")):
-        raise ValueError("model is required for the selected agent provider")
 
 
 def default_cli_runner_provider():
@@ -722,19 +709,11 @@ def clean_first_string(value, *keys):
 
 
 def clean_provider(value):
-    return normalize_provider_id(value) or DEFAULT_AGENT_PROVIDER
+    return normalize_provider_id(value)
 
 
 def normalize_provider_id(value):
-    value = str(value or "").strip().lower()
-    aliases = {
-        "claude": "claude-code",
-        "gemini-cli": "gemini",
-        "hermes-agent": "hermes",
-        "tutti": "nexight",
-        "open-claw": "openclaw",
-    }
-    return aliases.get(value, value)
+    return str(value or "").strip().lower()
 
 
 def normalize_locale(value):
@@ -914,15 +893,6 @@ def run_tutti_cli(args, timeout=60, log_file=None):
     return json.loads(result.stdout)
 
 
-def provider_start_command(provider):
-    provider = normalize_provider_id(provider)
-    if provider == "codex":
-        return ["codex", "start"]
-    if provider == "claude-code":
-        return ["claude", "start"]
-    raise ValueError(f"unsupported automation agent provider: {provider}")
-
-
 def start_agent_session(automation, run, log_file):
     title = automation["name"] or "Automation Task"
     runner_args = clean_string_list(automation.get("runnerArgs"))
@@ -932,7 +902,10 @@ def start_agent_session(automation, run, log_file):
         runner_args,
     )
     args = [
-        *provider_start_command(settings["provider"]),
+        "agent",
+        "start",
+        "--provider",
+        settings["provider"],
         "--cwd",
         run["cwd"],
         "--title",
@@ -943,9 +916,9 @@ def start_agent_session(automation, run, log_file):
         build_run_display_prompt(automation, run),
     ]
     if run.get("trigger") == "manual":
-        args.append("--show")
+        args.extend(["--show", "true"])
     else:
-        args.append("--visible")
+        args.extend(["--show", "false"])
     if settings.get("model"):
         args.extend(["--model", settings["model"]])
     if settings.get("reasoningEffort"):
@@ -1308,37 +1281,32 @@ def empty_runner_options_payload():
 
 def agent_providers_payload():
     result = run_tutti_cli(["agent", "providers"], timeout=30)
+    if result.get("schemaVersion") != 2:
+        raise RuntimeError("unsupported Tutti agent provider catalog schema")
     providers = []
     for item in result.get("providers") or []:
         if not isinstance(item, dict):
             continue
-        provider = normalize_provider_id(item.get("provider"))
-        status = str(item.get("status") or "").strip()
-        if (
-            not provider
-            or not is_supported_provider_status(status)
-            or not is_automation_supported_agent_provider(provider)
-        ):
+        provider = normalize_provider_id(item.get("providerId"))
+        availability = item.get("availability") if isinstance(item.get("availability"), dict) else {}
+        status = str(availability.get("status") or "").strip()
+        if not provider or not is_supported_provider_status(status):
             continue
         providers.append(
             {
                 "provider": provider,
                 "status": status,
-                "detail": str(item.get("detail") or item.get("message") or "").strip(),
+                "detail": str(availability.get("detail") or "").strip(),
             }
         )
     return {
-        "defaultProvider": normalize_provider_id(result.get("defaultProvider")),
+        "defaultProvider": normalize_provider_id(result.get("defaultProviderId")),
         "providers": providers,
     }
 
 
 def is_supported_provider_status(status):
     return str(status or "").strip().lower() in {"available", "ready"}
-
-
-def is_automation_supported_agent_provider(provider):
-    return normalize_provider_id(provider) in AUTOMATION_SUPPORTED_AGENT_PROVIDERS
 
 
 def default_provider_from_list(providers, preferred=None):
@@ -1351,19 +1319,13 @@ def default_provider_from_list(providers, preferred=None):
             ):
                 return preferred
     for item in providers:
-        if (
-            clean_provider(item.get("provider")) == DEFAULT_AGENT_PROVIDER
-            and is_supported_provider_status(item.get("status"))
-        ):
-            return DEFAULT_AGENT_PROVIDER
-    for item in providers:
         if is_supported_provider_status(item.get("status")):
             return clean_provider(item.get("provider"))
     for item in providers:
         provider = clean_provider(item.get("provider"))
         if provider:
             return provider
-    return DEFAULT_AGENT_PROVIDER
+    return ""
 
 
 def agent_composer_options_payload(provider, locale=None):

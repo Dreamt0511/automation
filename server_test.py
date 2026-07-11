@@ -39,10 +39,11 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
                 calls.append(args)
                 if args == ["agent", "providers"]:
                     return {
-                        "defaultProvider": "codex",
+                        "schemaVersion": 2,
+                        "defaultProviderId": "codex",
                         "providers": [
-                            {"provider": "codex", "status": "ready"},
-                            {"provider": "claude-code", "status": "ready"},
+                            {"providerId": "codex", "availability": {"status": "available"}},
+                            {"providerId": "claude-code", "availability": {"status": "available"}},
                         ],
                     }
                 if args == [
@@ -143,8 +144,9 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
             def fake_run_tutti_cli(args, timeout=30, log_file=None):
                 if args == ["agent", "providers"]:
                     return {
-                        "defaultProvider": "codex",
-                        "providers": [{"provider": "codex", "status": "ready"}],
+                        "schemaVersion": 2,
+                        "defaultProviderId": "codex",
+                        "providers": [{"providerId": "codex", "availability": {"status": "available"}}],
                     }
                 if args[:4] == ["agent", "composer-options", "--provider", "codex"]:
                     return {
@@ -181,10 +183,11 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
             def fake_run_tutti_cli(args, timeout=30, log_file=None):
                 if args == ["agent", "providers"]:
                     return {
-                        "defaultProvider": "codex",
+                        "schemaVersion": 2,
+                        "defaultProviderId": "codex",
                         "providers": [
-                            {"provider": "codex", "status": "ready"},
-                            {"provider": "claude-code", "status": "ready"},
+                            {"providerId": "codex", "availability": {"status": "available"}},
+                            {"providerId": "claude-code", "availability": {"status": "available"}},
                         ],
                     }
                 if args[:4] == ["agent", "composer-options", "--provider", "codex"]:
@@ -219,8 +222,9 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
             def fake_run_tutti_cli(args, timeout=30, log_file=None):
                 if args == ["agent", "providers"]:
                     return {
-                        "defaultProvider": "claude-code",
-                        "providers": [{"provider": "claude-code", "status": "ready"}],
+                        "schemaVersion": 2,
+                        "defaultProviderId": "claude-code",
+                        "providers": [{"providerId": "claude-code", "availability": {"status": "available"}}],
                     }
                 if args[:4] == ["agent", "composer-options", "--provider", "claude-code"]:
                     return {
@@ -263,8 +267,9 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
             def fake_run_tutti_cli(args, timeout=30, log_file=None):
                 if args == ["agent", "providers"]:
                     return {
-                        "defaultProvider": "claude-code",
-                        "providers": [{"provider": "claude-code", "status": "ready"}],
+                        "schemaVersion": 2,
+                        "defaultProviderId": "claude-code",
+                        "providers": [{"providerId": "claude-code", "availability": {"status": "available"}}],
                     }
                 if args[:4] == ["agent", "composer-options", "--provider", "claude-code"]:
                     return {
@@ -346,19 +351,19 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
             self.assertEqual(item["runnerSettings"]["provider"], "claude-code")
             self.assertEqual(item["runnerSettings"]["model"], "")
 
-    def test_normalize_automation_rejects_unsupported_provider(self):
+    def test_normalize_automation_allows_platform_catalog_providers(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
-            with self.assertRaisesRegex(ValueError, "unsupported automation agent provider: gemini"):
-                module.normalize_automation(
-                    {
-                        "name": "Review",
-                        "prompt": "Review the workspace.",
-                        "cwd": str(Path.cwd()),
-                        "runnerSettings": {"provider": "gemini"},
-                        "runnerArgs": [],
-                    }
-                )
+            item = module.normalize_automation(
+                {
+                    "name": "Review",
+                    "prompt": "Review the workspace.",
+                    "cwd": str(Path.cwd()),
+                    "runnerSettings": {"provider": "opencode"},
+                    "runnerArgs": [],
+                }
+            )
+            self.assertEqual(item["runnerSettings"]["provider"], "opencode")
 
 
 class ScheduleNormalizationTest(unittest.TestCase):
@@ -465,10 +470,11 @@ class ScheduleNormalizationTest(unittest.TestCase):
             def fake_run_tutti_cli(args, timeout=None):
                 if args == ["agent", "providers"]:
                     return {
-                        "defaultProvider": "claude-code",
+                        "schemaVersion": 2,
+                        "defaultProviderId": "claude-code",
                         "providers": [
-                            {"provider": "codex", "status": "ready"},
-                            {"provider": "claude-code", "status": "ready"},
+                            {"providerId": "codex", "availability": {"status": "available"}},
+                            {"providerId": "claude-code", "availability": {"status": "available"}},
                         ],
                     }
                 raise AssertionError(f"unexpected CLI args: {args!r}")
@@ -532,15 +538,14 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 session = module.start_agent_session(automation, run, log_file=None)
 
             self.assertEqual(session["agentSessionId"], "agent-session-1")
-            self.assertEqual(calls[0][:2], ["codex", "start"])
-            self.assertNotIn("--provider", calls[0])
+            self.assertEqual(calls[0][:2], ["agent", "start"])
+            self.assertEqual(calls[0][calls[0].index("--provider") + 1], "codex")
             self.assertEqual(calls[0][calls[0].index("--title") + 1], "Review")
             self.assertEqual(
                 calls[0][calls[0].index("--display-prompt") + 1],
                 "Review the workspace.",
             )
-            self.assertIn("--show", calls[0])
-            self.assertNotIn("--visible", calls[0])
+            self.assertEqual(calls[0][calls[0].index("--show") + 1], "true")
 
     def test_scheduled_run_stays_visible_without_activating_agent_gui(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -569,17 +574,16 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 session = module.start_agent_session(automation, run, log_file=None)
 
             self.assertEqual(session["agentSessionId"], "agent-session-1")
-            self.assertEqual(calls[0][:2], ["codex", "start"])
-            self.assertNotIn("--provider", calls[0])
+            self.assertEqual(calls[0][:2], ["agent", "start"])
+            self.assertEqual(calls[0][calls[0].index("--provider") + 1], "codex")
             self.assertEqual(calls[0][calls[0].index("--title") + 1], "Review")
             self.assertEqual(
                 calls[0][calls[0].index("--display-prompt") + 1],
                 "Review the workspace.",
             )
-            self.assertIn("--visible", calls[0])
-            self.assertNotIn("--show", calls[0])
+            self.assertEqual(calls[0][calls[0].index("--show") + 1], "false")
 
-    def test_claude_code_run_uses_provider_start_command(self):
+    def test_claude_code_run_uses_generic_provider_start(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
             calls = []
@@ -606,8 +610,8 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 session = module.start_agent_session(automation, run, log_file=None)
 
             self.assertEqual(session["agentSessionId"], "agent-session-1")
-            self.assertEqual(calls[0][:2], ["claude", "start"])
-            self.assertNotIn("--provider", calls[0])
+            self.assertEqual(calls[0][:2], ["agent", "start"])
+            self.assertEqual(calls[0][calls[0].index("--provider") + 1], "claude-code")
 
     def test_runner_args_are_forwarded_without_duplicate_structured_flags(self):
         with tempfile.TemporaryDirectory() as temp_dir:
