@@ -32,6 +32,7 @@ jobs:
     uses: tutti-os/tutti/.github/workflows/publish-tutti-app-release.yml@main
     with:
       app_id: automation
+      min_tutti_version: "0.1.18"
       package_command: pnpm package:tutti-app
       package_dir: dist/tutti-app/automation
       icon_path: dist/tutti-app/automation/icon.png
