@@ -3,8 +3,6 @@ import {
   RichTextTriggerEditor,
   type RichTextTriggerEditorProps,
 } from '@tutti-os/ui-rich-text/editor';
-import type { RichTextTriggerProvider } from '@tutti-os/ui-rich-text/types';
-import { createTuttiExternalAgentContextMentionProviders } from '../lib/tuttiExternal';
 import { useI18n } from '../i18n';
 
 type PromptRichTextInputProps = {
@@ -23,10 +21,6 @@ export function PromptRichTextInput({
   onChange,
 }: PromptRichTextInputProps) {
   const { t } = useI18n();
-  const triggerProviders = useMemo<readonly RichTextTriggerProvider<any>[]>(
-    () => createTuttiExternalAgentContextMentionProviders(),
-    [],
-  );
   const palette = useMemo<NonNullable<RichTextTriggerEditorProps['palette']>>(
     () => ({
       categories: [
@@ -68,7 +62,6 @@ export function PromptRichTextInput({
         noMatchesLabel: t('form.promptMentionEmpty'),
         removeReferenceActionLabel: t('form.promptMentionRemove'),
       }}
-      triggerProviders={triggerProviders}
       value={value}
       onChange={onChange}
       overlay={
