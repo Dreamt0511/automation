@@ -1,10 +1,10 @@
 import type { TuttiExternalAtProviderId } from '@tutti-os/workspace-external-core/contracts';
-import type { AutomationTuttiExternalAtQueryResult } from '../lib/tuttiExternalTypes';
+import type { TuttiExternalAtQueryResult } from '@tutti-os/workspace-external-core/contracts';
 import type { TuttiExternalLogInput } from '../lib/tuttiExternalLogs';
 
 const devWorkspaceId = 'dev-workspace';
 
-const fixtureItems: readonly AutomationTuttiExternalAtQueryResult[] = [
+const fixtureItems: readonly TuttiExternalAtQueryResult[] = [
   // {
   //   providerId: 'file',
   //   itemId: 'README.md',
@@ -151,7 +151,7 @@ function normalizeKeyword(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function matchesKeyword(item: AutomationTuttiExternalAtQueryResult, keyword: string): boolean {
+function matchesKeyword(item: TuttiExternalAtQueryResult, keyword: string): boolean {
   if (!keyword) return true;
   const haystack = [item.label, item.subtitle ?? '', item.itemId].join(' ').toLowerCase();
   return haystack.includes(keyword);
