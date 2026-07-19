@@ -26,7 +26,6 @@ const env = {
   TUTTI_APP_ID: 'automation',
   TUTTI_WORKSPACE_ID: process.env.TUTTI_WORKSPACE_ID || 'dev-workspace',
   TUTTI_WORKSPACE_NAME: process.env.TUTTI_WORKSPACE_NAME || 'Dev Workspace',
-  TUTTI_WORKSPACE_ROOT: process.env.TUTTI_WORKSPACE_ROOT || ROOT,
   TUTTI_APP_HOST: host,
   TUTTI_APP_PORT: port,
   TUTTI_APP_BASE_URL: `http://${host}:${port}`,
