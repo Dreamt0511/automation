@@ -201,6 +201,8 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
                     "composer-options",
                     "--agent-id",
                     "local:codex",
+                    "--cwd",
+                    str(module.AGENT_WORK_DIR),
                     "--locale",
                     "zh-CN",
                 ]:
@@ -267,6 +269,8 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
                     "composer-options",
                     "--agent-id",
                     "local:codex",
+                    "--cwd",
+                    str(module.AGENT_WORK_DIR),
                     "--locale",
                     "zh-CN",
                 ],
@@ -282,6 +286,49 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
                 payload["permissionConfig"]["modes"][0]["label"],
                 "代我批准",
             )
+
+    def test_default_cwd_uses_a_runtime_agent_workspace_not_app_data(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+
+            item = module.normalize_automation(
+                {
+                    "name": "Review",
+                    "prompt": "Review the workspace.",
+                    "runnerSettings": {"agentTargetId": "local:codex", "providerId": "codex"},
+                    "runnerArgs": [],
+                }
+            )
+
+            self.assertEqual(item["cwd"], str(module.AGENT_WORK_DIR))
+            self.assertTrue(module.AGENT_WORK_DIR.is_dir())
+            self.assertEqual(module.AGENT_WORK_DIR.parent, module.RUNTIME_DIR)
+            self.assertNotEqual(module.AGENT_WORK_DIR, module.DATA_DIR)
+            self.assertEqual(module.DB_PATH.parent, module.DATA_DIR)
+            self.assertEqual(module.cwd_options_payload()["cwd"], str(module.AGENT_WORK_DIR))
+            self.assertEqual(module.context_payload()["agentWorkDir"], str(module.AGENT_WORK_DIR))
+
+    def test_explicit_cwd_is_canonical_and_confined_to_agent_workspace(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            explicit_cwd = module.AGENT_WORK_DIR / "project"
+            explicit_cwd.mkdir()
+
+            self.assertEqual(module.clean_cwd(str(explicit_cwd)), str(explicit_cwd.resolve()))
+            self.assertEqual(module.clean_cwd("project"), str(explicit_cwd.resolve()))
+            with self.assertRaisesRegex(ValueError, "cwd must be an existing directory"):
+                module.clean_cwd("missing")
+
+            sibling = module.AGENT_WORK_DIR.parent / "outside"
+            sibling.mkdir()
+            for value in (str(sibling), "../outside"):
+                with self.assertRaisesRegex(ValueError, "must stay inside"):
+                    module.clean_cwd(value)
+
+            escape = module.AGENT_WORK_DIR / "escape"
+            escape.symlink_to(sibling, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "must stay inside"):
+                module.clean_cwd(str(escape))
 
     def test_runner_options_prefers_runtime_context_model_options(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -440,7 +487,7 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
                     {
                         "name": "Review",
                         "prompt": "Review the workspace.",
-                        "cwd": str(Path.cwd()),
+                        "cwd": str(module.AGENT_WORK_DIR),
                         "runnerSettings": {},
                         "runnerArgs": [],
                     }
@@ -453,7 +500,7 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
                 {
                     "name": "Review",
                     "prompt": "Review the workspace.",
-                    "cwd": str(Path.cwd()),
+                    "cwd": str(module.AGENT_WORK_DIR),
                     "runnerSettings": {"agentTargetId": "local:codex", "providerId": "codex"},
                     "runnerArgs": [],
                 }
@@ -469,7 +516,7 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
                 {
                     "name": "Review",
                     "prompt": "Review the workspace.",
-                    "cwd": str(Path.cwd()),
+                    "cwd": str(module.AGENT_WORK_DIR),
                     "runnerSettings": {"agentTargetId": "local:reviewer", "providerId": "review-provider"},
                     "runnerArgs": [],
                 }
@@ -485,7 +532,7 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
                 {
                     "name": "Review",
                     "prompt": "Review the workspace.",
-                    "cwd": str(Path.cwd()),
+                    "cwd": str(module.AGENT_WORK_DIR),
                     "runnerSettings": {"agentTargetId": "local:opencode", "providerId": "opencode"},
                     "runnerArgs": [],
                 }
@@ -501,7 +548,7 @@ class ScheduleNormalizationTest(unittest.TestCase):
                 {
                     "name": "Review",
                     "prompt": "Review the workspace.",
-                    "cwd": str(Path.cwd()),
+                    "cwd": str(module.AGENT_WORK_DIR),
                     "scheduleType": "daily",
                     "schedule": {"timeOfDay": "17:30"},
                     "runnerSettings": {"agentTargetId": "local:codex", "providerId": "codex", "model": "gpt-5"},
@@ -519,7 +566,7 @@ class ScheduleNormalizationTest(unittest.TestCase):
                     {
                         "name": "Review",
                         "prompt": "Review the workspace.",
-                        "cwd": str(Path.cwd()),
+                        "cwd": str(module.AGENT_WORK_DIR),
                         "scheduleType": "daily",
                         "schedule": {"timeOfDay": "25:00"},
                         "runnerSettings": {"agentTargetId": "local:codex", "providerId": "codex", "model": "gpt-5"},
@@ -671,7 +718,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 "id": "run_123",
                 "trigger": "manual",
                 "prompt": "Review the workspace.",
-                "cwd": str(Path.cwd()),
+                "cwd": str(module.AGENT_WORK_DIR),
                 "artifactDir": str(Path(temp_dir) / "artifacts"),
                 "agentTargetId": "local:legacy",
                 "agentProvider": "legacy-runtime",
@@ -756,7 +803,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 "id": "run_123",
                 "trigger": "manual",
                 "prompt": "Review the workspace.",
-                "cwd": str(Path.cwd()),
+                "cwd": str(module.AGENT_WORK_DIR),
                 "artifactDir": str(Path(temp_dir) / "artifacts"),
                 "agentTargetId": "local:codex",
                 "agentProvider": "codex",
@@ -798,7 +845,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 "id": "run_123",
                 "trigger": "schedule",
                 "prompt": "Review the workspace.",
-                "cwd": str(Path.cwd()),
+                "cwd": str(module.AGENT_WORK_DIR),
                 "artifactDir": str(Path(temp_dir) / "artifacts"),
                 "agentTargetId": "local:codex",
                 "agentProvider": "codex",
@@ -840,7 +887,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 "id": "run_123",
                 "trigger": "manual",
                 "prompt": "Review the workspace.",
-                "cwd": str(Path.cwd()),
+                "cwd": str(module.AGENT_WORK_DIR),
                 "artifactDir": str(Path(temp_dir) / "artifacts"),
                 "agentTargetId": "local:reviewer",
                 "agentProvider": "review-provider",
@@ -875,7 +922,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 "id": "run_123",
                 "trigger": "schedule",
                 "prompt": "Review the workspace.",
-                "cwd": str(Path.cwd()),
+                "cwd": str(module.AGENT_WORK_DIR),
                 "artifactDir": str(Path(temp_dir) / "artifacts"),
                 "agentTargetId": "local:codex",
                 "agentProvider": "codex",
@@ -913,7 +960,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 "id": "run_123",
                 "trigger": "schedule",
                 "prompt": "Review the workspace.",
-                "cwd": str(Path.cwd()),
+                "cwd": str(module.AGENT_WORK_DIR),
                 "artifactDir": str(Path(temp_dir) / "artifacts"),
                 "agentTargetId": "local:codex",
                 "agentProvider": "codex",
@@ -989,7 +1036,7 @@ class RunAgentSnapshotTest(unittest.TestCase):
                 {
                     "name": "Snapshot test",
                     "prompt": "Review",
-                    "cwd": str(Path.cwd()),
+                    "cwd": str(module.AGENT_WORK_DIR),
                     "enabled": False,
                     "scheduleType": "daily",
                     "schedule": {"timeOfDay": "09:00"},
@@ -1035,7 +1082,7 @@ class RunAgentSnapshotTest(unittest.TestCase):
                 "id": "run_123",
                 "trigger": "manual",
                 "prompt": "Review the workspace.",
-                "cwd": str(Path.cwd()),
+                "cwd": str(module.AGENT_WORK_DIR),
                 "artifactDir": str(Path(temp_dir) / "artifacts"),
                 "agentTargetId": "local:codex",
                 "agentProvider": "codex",
@@ -1097,7 +1144,7 @@ class RunAgentSnapshotTest(unittest.TestCase):
                 "id": "run_queued",
                 "trigger": "schedule",
                 "prompt": "Review the workspace.",
-                "cwd": str(Path.cwd()),
+                "cwd": str(module.AGENT_WORK_DIR),
                 "artifactDir": str(Path(temp_dir) / "artifacts"),
                 "agentTargetId": "team:queued",
                 "agentProvider": "shared-runtime",
@@ -1139,6 +1186,20 @@ class RunAgentSnapshotTest(unittest.TestCase):
             self.assertIsNone(failed["agentProvider"])
             self.assertEqual(failed["error"], "Agent Target is unavailable")
             self.assertIsNotNone(failed["finishedAt"])
+
+    def test_enqueue_rejects_legacy_persisted_cwd_outside_agent_workspace(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            automation = self.save_automation(module)
+            outside = Path(temp_dir) / "legacy-workspace"
+            outside.mkdir()
+            automation["cwd"] = str(outside)
+            runner = module.Runner(module.STORE)
+
+            with self.assertRaisesRegex(ValueError, "must stay inside"):
+                runner.enqueue(automation, "schedule")
+
+            self.assertEqual(module.STORE.list_runs(automation["id"]), [])
 
     def test_enqueue_rolls_back_durable_queue_when_worker_cannot_start(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1346,7 +1407,7 @@ class RunEventHubTest(unittest.TestCase):
                     {
                         "name": "Review",
                         "prompt": "Review the workspace.",
-                        "cwd": str(Path.cwd()),
+                        "cwd": str(module.AGENT_WORK_DIR),
                         "runnerSettings": {"agentTargetId": "local:codex", "providerId": "codex", "model": "gpt-5"},
                     }
                 )
@@ -1444,7 +1505,7 @@ class SchedulerTest(unittest.TestCase):
                     {
                         "name": "Before",
                         "prompt": "Review",
-                        "cwd": str(Path.cwd()),
+                        "cwd": str(module.AGENT_WORK_DIR),
                         "enabled": True,
                         "scheduleType": "interval",
                         "schedule": {"intervalMinutes": 15},
@@ -1478,7 +1539,7 @@ class SchedulerTest(unittest.TestCase):
                     {
                         "name": "Delete me",
                         "prompt": "Review",
-                        "cwd": str(Path.cwd()),
+                        "cwd": str(module.AGENT_WORK_DIR),
                         "enabled": True,
                         "scheduleType": "interval",
                         "schedule": {"intervalMinutes": 15},
@@ -1510,7 +1571,7 @@ class SchedulerTest(unittest.TestCase):
                     {
                         "name": "Legacy provider task",
                         "prompt": "Review",
-                        "cwd": str(Path.cwd()),
+                        "cwd": str(module.AGENT_WORK_DIR),
                         "enabled": True,
                         "scheduleType": "interval",
                         "schedule": {"intervalMinutes": 15},
@@ -1548,7 +1609,7 @@ class SchedulerTest(unittest.TestCase):
                     {
                         "name": "Unavailable legacy provider task",
                         "prompt": "Review",
-                        "cwd": str(Path.cwd()),
+                        "cwd": str(module.AGENT_WORK_DIR),
                         "enabled": True,
                         "scheduleType": "interval",
                         "schedule": {"intervalMinutes": 15},
@@ -2363,7 +2424,7 @@ def make_run(module, run_status, trigger="manual"):
             {
                 "name": "Test automation",
                 "prompt": "Review",
-                "cwd": str(Path.cwd()),
+                "cwd": str(module.AGENT_WORK_DIR),
                 "enabled": False,
                 "scheduleType": "daily",
                 "schedule": {"timeOfDay": "09:00"},
@@ -2381,7 +2442,7 @@ def make_run(module, run_status, trigger="manual"):
             "trigger": trigger,
             "runStatus": run_status,
             "prompt": "Review",
-            "cwd": str(Path.cwd()),
+            "cwd": str(module.AGENT_WORK_DIR),
             "queuedAt": module.now_iso(),
             "startedAt": module.now_iso() if run_status != "queued" else None,
             "artifactDir": str(Path(module.LOG_DIR) / "runs" / automation["id"] / "run_123"),

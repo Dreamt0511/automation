@@ -71,7 +71,7 @@ export function ConfigDialog({
   const [dialogRunnerOptions, setDialogRunnerOptions] = useState(runnerOptions);
   const [name, setName] = useState(automation?.name ?? (initialTemplate ? t(initialTemplate.nameKey) : ''));
   const [prompt, setPrompt] = useState(automation?.prompt ?? (initialTemplate ? t(initialTemplate.promptKey) : ''));
-  const [cwd, setCwd] = useState(automation?.cwd ?? context?.workspaceRoot ?? '');
+  const [cwd, setCwd] = useState(automation?.cwd ?? context?.agentWorkDir ?? '');
   const [agentTargetId, setAgentTargetId] = useState(initialRunnerSelection.agentTargetId);
   const [model, setModel] = useState(initialRunnerSelection.model);
   const [reasoningEffort, setReasoningEffort] = useState(initialRunnerSelection.reasoningEffort);
@@ -93,7 +93,7 @@ export function ConfigDialog({
 
   useEffect(() => {
     const nextRunnerSelection = resolveRunnerSelection(automation, runnerOptions);
-    const nextCwd = automation?.cwd ?? context?.workspaceRoot ?? '';
+    const nextCwd = automation?.cwd ?? context?.agentWorkDir ?? '';
     const preferredAgentTargetId = resolveAutomationAgentTargetId(automation, runnerOptions);
     const globalAgentTargetId = normalizeText(runnerOptions.agentTargetId);
     const agentCatalogMatches =
@@ -310,7 +310,7 @@ export function ConfigDialog({
     onSave({
       name,
       prompt,
-      cwd: cwd || context?.workspaceRoot || '',
+      cwd: cwd || context?.agentWorkDir || '',
       enabled: automation?.enabled ?? true,
       scheduleType: scheduleConfig.scheduleType,
       schedule: scheduleConfig.schedule,
@@ -397,7 +397,7 @@ export function ConfigDialog({
                   value={prompt}
                   placeholder={t('form.promptPlaceholder')}
                   workspaceId={context?.workspaceId}
-                  sessionCwd={cwd || context?.workspaceRoot}
+                  sessionCwd={cwd || context?.agentWorkDir}
                   onChange={setPrompt}
                 />
               </label>
@@ -406,7 +406,7 @@ export function ConfigDialog({
                 <RunnerSelectMenu
                   className="cwd-menu-field"
                   label={
-                    cwdCustomMode ? t('cwd.customPath') : cwdLabel(cwd, cwdOptions, context?.workspaceRoot, t)
+                    cwdCustomMode ? t('cwd.customPath') : cwdLabel(cwd, cwdOptions, context?.agentWorkDir, t)
                   }
                   title={t('aria.workingDirectory')}
                   value={cwdCustomMode ? CUSTOM_CWD_VALUE : cwd}
@@ -842,12 +842,12 @@ function cwdOptionLabel(
 function cwdLabel(
   cwd: string,
   options: CwdOption[],
-  workspaceRoot: string | null | undefined,
+  defaultCwd: string | null | undefined,
   t: (key: string, params?: Record<string, string | number>) => string,
 ): string {
   const selected = options.find((option) => option.path === cwd);
   if (selected) return cwdOptionLabel(selected, t);
-  return cwd || workspaceRoot || '';
+  return cwd || defaultCwd || '';
 }
 
 function normalizeText(value: unknown): string {

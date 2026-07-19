@@ -77,7 +77,7 @@
           },
           "cwd": {
             "type": "string",
-            "description": "Working directory. Defaults to the workspace root."
+            "description": "Working directory inside the app-managed agent workspace. Defaults to that agent workspace."
           },
           "enabled": {
             "type": "boolean",
@@ -174,7 +174,7 @@
           },
           "cwd": {
             "type": "string",
-            "description": "Working directory."
+            "description": "Working directory inside the app-managed agent workspace."
           },
           "enabled": {
             "type": "boolean",

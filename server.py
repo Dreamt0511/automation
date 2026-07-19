@@ -18,8 +18,8 @@ PACKAGE_DIR = Path(os.environ["TUTTI_APP_PACKAGE_DIR"])
 STATIC_DIR = Path(os.environ.get("TUTTI_AUTOMATION_STATIC_DIR") or (PACKAGE_DIR / "static")).expanduser().resolve()
 DATA_DIR = Path(os.environ["TUTTI_APP_DATA_DIR"])
 LOG_DIR = Path(os.environ["TUTTI_APP_LOG_DIR"])
-RUNTIME_DIR = Path(os.environ["TUTTI_APP_RUNTIME_DIR"])
-WORKSPACE_ROOT = os.environ.get("TUTTI_WORKSPACE_ROOT", "").strip()
+RUNTIME_DIR = Path(os.environ["TUTTI_APP_RUNTIME_DIR"]).expanduser().resolve()
+AGENT_WORK_DIR = (RUNTIME_DIR / "agent-workspace").resolve()
 WORKSPACE_ID = os.environ["TUTTI_WORKSPACE_ID"]
 WORKSPACE_NAME = os.environ.get("TUTTI_WORKSPACE_NAME", WORKSPACE_ID)
 DB_PATH = DATA_DIR / "automation.sqlite3"
@@ -39,6 +39,7 @@ RUNNER_OPTIONS_COMPOSER_TIMEOUT_SECONDS = float(
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+AGENT_WORK_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def now_iso():
@@ -830,12 +831,21 @@ def normalize_locale(value):
 
 
 def clean_cwd(value):
-    value = str(value or WORKSPACE_ROOT or str(Path.home())).strip()
+    value = str(value or AGENT_WORK_DIR).strip()
     if not value:
         raise ValueError("cwd is required")
+    root = AGENT_WORK_DIR.expanduser().resolve()
     path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = root / path
+    try:
+        path = path.resolve(strict=True)
+    except (FileNotFoundError, OSError):
+        raise ValueError("cwd must be an existing directory")
     if not path.is_dir():
         raise ValueError("cwd must be an existing directory")
+    if path != root and root not in path.parents:
+        raise ValueError("cwd must stay inside the app agent workspace")
     return str(path)
 
 
@@ -1023,6 +1033,7 @@ def start_agent_session(automation, run, log_file):
             f"Agent Target provider changed while queued: expected {provider_id}, "
             f"got {current_target['providerId']}"
         )
+    run_cwd = clean_cwd(run.get("cwd"))
     cli_contract = catalog["cliContract"]
     args = [
         "agent",
@@ -1030,7 +1041,7 @@ def start_agent_session(automation, run, log_file):
         "--agent-id" if cli_contract == "agent-id" else "--provider",
         agent_target_id if cli_contract == "agent-id" else provider_id,
         "--cwd",
-        run["cwd"],
+        run_cwd,
         "--title",
         title,
         "--prompt",
@@ -1702,9 +1713,7 @@ def agent_composer_options_payload(target, catalog, locale=None):
         "--agent-id" if catalog["cliContract"] == "agent-id" else "--provider",
         target["agentTargetId"] if catalog["cliContract"] == "agent-id" else target["providerId"],
     ]
-    workspace_root = clean_optional_string(WORKSPACE_ROOT)
-    if workspace_root:
-        args.extend(["--cwd", workspace_root])
+    args.extend(["--cwd", str(AGENT_WORK_DIR)])
     locale = normalize_locale(locale)
     if locale:
         args.extend(["--locale", locale])
@@ -1920,7 +1929,7 @@ def normalize_reasoning_options(options):
 
 
 def cwd_options_payload():
-    root = Path(WORKSPACE_ROOT or Path.home()).expanduser()
+    root = AGENT_WORK_DIR
     options = []
     seen = set()
 
@@ -2085,6 +2094,7 @@ class Runner:
         self.processes = {}
 
     def enqueue(self, automation, trigger):
+        run_cwd = clean_cwd(automation.get("cwd"))
         active = self.store.has_active_run(automation["id"])
         concurrency = "queue" if trigger == "schedule" else automation["concurrency"]
         if active and concurrency == "skip":
@@ -2110,7 +2120,7 @@ class Runner:
             "trigger": trigger,
             "runStatus": "queued",
             "prompt": automation["prompt"],
-            "cwd": automation["cwd"],
+            "cwd": run_cwd,
             "queuedAt": now_iso(),
             "agentTargetId": target["agentTargetId"],
             "agentProvider": target["providerId"],
@@ -2136,6 +2146,7 @@ class Runner:
             raise
         queued_automation = {
             **automation,
+            "cwd": run_cwd,
             "_agentCliContract": catalog["cliContract"],
         }
         try:
@@ -3219,10 +3230,10 @@ def context_payload():
     return {
         "workspaceId": WORKSPACE_ID,
         "workspaceName": WORKSPACE_NAME,
-        "workspaceRoot": WORKSPACE_ROOT,
         "dataDir": str(DATA_DIR),
         "logDir": str(LOG_DIR),
         "runtimeDir": str(RUNTIME_DIR),
+        "agentWorkDir": str(AGENT_WORK_DIR),
     }
 
 
@@ -3230,6 +3241,7 @@ def main():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    AGENT_WORK_DIR.mkdir(parents=True, exist_ok=True)
     host = os.environ.get("TUTTI_APP_HOST", "127.0.0.1")
     port = int(os.environ["TUTTI_APP_PORT"])
     print(f"Automation listening on {host}:{port}", flush=True)

@@ -62,10 +62,10 @@ export type AutomationRun = {
 export type AppContext = {
   workspaceId: string;
   workspaceName: string;
-  workspaceRoot: string;
   dataDir: string;
   logDir: string;
   runtimeDir: string;
+  agentWorkDir: string;
 };
 
 export type RunnerReasoningLevel = {
