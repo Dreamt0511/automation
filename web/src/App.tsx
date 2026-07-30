@@ -27,7 +27,7 @@ import {
   scheduleDraftFromAutomation,
 } from './lib/schedule';
 import { handleAutomationEventMessage } from './lib/automationEvents';
-import { listRegisteredProjects, mergeCwdOptions } from './lib/cwdOptions';
+import { listRegisteredProjects, reconcileCwdOptions } from './lib/cwdOptions';
 
 type LoadState = {
   automations: Automation[];
@@ -81,13 +81,11 @@ export function App() {
     setState((current) => ({
       ...current,
       context: contextResult.status === 'fulfilled' ? contextResult.value : current.context,
-      cwdOptions:
-        cwdOptionsResult.status === 'fulfilled'
-          ? mergeCwdOptions(
-              cwdOptionsResult.value.directories,
-              registeredProjectsResult.status === 'fulfilled' ? registeredProjectsResult.value : [],
-            )
-          : current.cwdOptions,
+      cwdOptions: reconcileCwdOptions(
+        current.cwdOptions,
+        cwdOptionsResult.status === 'fulfilled' ? cwdOptionsResult.value.directories : undefined,
+        registeredProjectsResult.status === 'fulfilled' ? registeredProjectsResult.value : undefined,
+      ),
     }));
   }, []);
 
@@ -151,7 +149,8 @@ export function App() {
 
   useEffect(() => {
     void loadAutomations({ showLoading: true });
-  }, [loadAutomations]);
+    void loadContextOptions();
+  }, [loadAutomations, loadContextOptions]);
 
   useEffect(() => {
     void loadRunnerOptions();
@@ -198,22 +197,22 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [inboxAutomationId, loadAutomations, loadRuns, state.automations]);
 
-  const openCreateDialog = async (template?: TemplateDefinition) => {
-    await loadContextOptions();
+  const openCreateDialog = (template?: TemplateDefinition) => {
     setEditingAutomation(null);
     setCreateTemplate(template ?? null);
     setScheduleDraft(template ? templateScheduleDraft(template) : defaultScheduleDraft);
     setConfigOpen(true);
     setError(null);
+    void loadContextOptions();
   };
 
-  const openEditDialog = async (automation: Automation) => {
-    await loadContextOptions();
+  const openEditDialog = (automation: Automation) => {
     setEditingAutomation(automation);
     setCreateTemplate(null);
     setScheduleDraft(scheduleDraftFromAutomation(automation));
     setConfigOpen(true);
     setError(null);
+    void loadContextOptions();
   };
 
   const saveAutomation = async (payload: AutomationFormPayload) => {

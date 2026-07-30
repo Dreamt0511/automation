@@ -19,13 +19,35 @@ export function mergeCwdOptions(
     seenPaths.add(path);
     options.push({
       id: `registered:${project.id}`,
-      kind: 'project',
+      kind: 'registered-project',
       label: project.label.trim() || path,
       path,
     });
   }
 
   return options;
+}
+
+export function reconcileCwdOptions(
+  current: readonly CwdOption[],
+  appDirectories: readonly CwdOption[] | undefined,
+  registeredProjects: readonly RegisteredProject[] | undefined,
+): CwdOption[] {
+  if (!appDirectories && !registeredProjects) return [...current];
+
+  const nextAppDirectories =
+    appDirectories ?? current.filter((option) => option.kind !== 'registered-project');
+  const nextRegisteredProjects =
+    registeredProjects ??
+    current
+      .filter((option) => option.kind === 'registered-project')
+      .map((option) => ({
+        id: option.id.replace(/^registered:/, ''),
+        label: option.label,
+        path: option.path,
+      }));
+
+  return mergeCwdOptions(nextAppDirectories, nextRegisteredProjects);
 }
 
 export async function listRegisteredProjects(): Promise<RegisteredProject[]> {
