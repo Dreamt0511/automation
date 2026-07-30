@@ -151,12 +151,7 @@ export function App() {
 
   useEffect(() => {
     void loadAutomations({ showLoading: true });
-    void loadContextOptions();
-  }, [loadAutomations, loadContextOptions]);
-
-  useEffect(() => {
-    if (configOpen) void loadContextOptions();
-  }, [configOpen, loadContextOptions]);
+  }, [loadAutomations]);
 
   useEffect(() => {
     void loadRunnerOptions();
@@ -203,7 +198,8 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [inboxAutomationId, loadAutomations, loadRuns, state.automations]);
 
-  const openCreateDialog = (template?: TemplateDefinition) => {
+  const openCreateDialog = async (template?: TemplateDefinition) => {
+    await loadContextOptions();
     setEditingAutomation(null);
     setCreateTemplate(template ?? null);
     setScheduleDraft(template ? templateScheduleDraft(template) : defaultScheduleDraft);
@@ -211,7 +207,8 @@ export function App() {
     setError(null);
   };
 
-  const openEditDialog = (automation: Automation) => {
+  const openEditDialog = async (automation: Automation) => {
+    await loadContextOptions();
     setEditingAutomation(automation);
     setCreateTemplate(null);
     setScheduleDraft(scheduleDraftFromAutomation(automation));
