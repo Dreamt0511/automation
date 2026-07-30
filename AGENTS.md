@@ -108,3 +108,8 @@ catalog; ambiguous mappings must fail closed. Starting and composing use
 `--agent-id`, except when an old daemon rejects exactly `agent list` and the
 legacy catalog has a unique provider mapping. Resume, summary, and open flows
 must validate that the session's `agentTargetId` matches the persisted run.
+Run lifecycle must use the exact top-level `turnId` returned by `agent start`,
+then follow `agent wait --json` until its reason reaches a stop point. Use
+`finalMessage.text` as the run summary and `agent cancel-turn` with that exact
+Turn identity for cancellation. Do not infer completion from deprecated
+Session `status`/`turnLifecycle` fields or `agent session-summary`.

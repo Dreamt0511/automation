@@ -790,7 +790,14 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 calls.append(args)
                 if args == ["agent", "list"]:
                     return agent_catalog()
-                return {"session": {"agentSessionId": "agent-session-1", "agentTargetId": "local:codex", "provider": "codex"}}
+                return {
+                    "turnId": "turn-1",
+                    "session": {
+                        "agentSessionId": "agent-session-1",
+                        "agentTargetId": "local:codex",
+                        "provider": "codex",
+                    },
+                }
 
             automation = {
                 "name": "Review",
@@ -813,6 +820,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 session = module.start_agent_session(automation, run, log_file=None)
 
             self.assertEqual(session["agentSessionId"], "agent-session-1")
+            self.assertEqual(session["turnId"], "turn-1")
             start_call = next(call for call in calls if call[:2] == ["agent", "start"])
             self.assertEqual(start_call[:2], ["agent", "start"])
             self.assertEqual(start_call[start_call.index("--agent-id") + 1], "local:codex")
@@ -991,17 +999,19 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 mock.patch.object(
                     module,
                     "start_agent_session",
-                    return_value={"agentSessionId": "agent-session-1", "agentTargetId": "local:codex", "provider": "codex"},
+                    return_value={
+                        "agentSessionId": "agent-session-1",
+                        "turnId": "turn-1",
+                        "agentTargetId": "local:codex",
+                        "provider": "codex",
+                    },
                 ),
                 mock.patch.object(module, "open_agent_session", fake_open_agent_session),
-                mock.patch.object(module, "get_agent_session", return_value={"status": "running"}),
                 mock.patch.object(
                     module,
-                    "terminal_agent_status",
-                    side_effect=[(None, None), ("failed", "stop")],
+                    "wait_for_agent_stop",
+                    return_value=("failed", "stop", "Stopped."),
                 ),
-                mock.patch.object(module, "latest_agent_summary", return_value="Stopped."),
-                mock.patch.object(module.time, "sleep", return_value=None),
             ):
                 module.Runner(module.STORE).run(run["id"], automation)
 
@@ -1017,12 +1027,20 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 mock.patch.object(
                     module,
                     "start_agent_session",
-                    return_value={"agentSessionId": "agent-session-1", "agentTargetId": "local:codex", "provider": "codex"},
+                    return_value={
+                        "agentSessionId": "agent-session-1",
+                        "turnId": "turn-1",
+                        "agentTargetId": "local:codex",
+                        "provider": "codex",
+                    },
                 ),
                 mock.patch.object(module, "open_agent_session") as open_mock,
-                mock.patch.object(module, "get_agent_session", return_value={"status": "ready"}),
                 mock.patch.object(module, "COMPLETION_GRACE_SECONDS", 0),
-                mock.patch.object(module, "agent_session_messages", return_value=[]),
+                mock.patch.object(
+                    module,
+                    "wait_for_agent_stop",
+                    return_value=("succeeded", None, None),
+                ),
             ):
                 module.Runner(module.STORE).run(run["id"], automation)
 
@@ -1168,6 +1186,25 @@ class RunAgentSnapshotTest(unittest.TestCase):
             self.assertEqual(canceled["runStatus"], "canceled")
             self.assertEqual(canceled["agentTargetId"], "local:reviewer")
             self.assertEqual(canceled["agentProvider"], "review-provider")
+
+    def test_running_cancel_resolves_and_cancels_the_active_turn(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            automation = self.save_automation(module)
+            runner = module.Runner(module.STORE)
+            run = self.enqueue_without_worker(module, runner, automation)
+            run["runStatus"] = "running"
+            run["agentSessionId"] = "agent-session-1"
+            module.STORE.save_run(run)
+
+            with mock.patch.object(module, "cancel_active_agent_turn") as cancel_mock:
+                canceled = runner.cancel(run["id"])
+
+            self.assertEqual(canceled["runStatus"], "canceling")
+            cancel_mock.assert_called_once_with(
+                "agent-session-1",
+                "local:reviewer",
+            )
 
     def test_scheduled_enqueue_failure_is_persisted_with_requested_exact_target(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1700,16 +1737,18 @@ def fake_interval_automation(module, next_run_at, automation_id="aut_1"):
 
 
 class AgentGetLogCompactionTest(unittest.TestCase):
-    def test_compact_agent_get_log_stdout_keeps_poll_summary_only(self):
+    def test_compact_agent_get_log_stdout_keeps_current_session_fields(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
             stdout = json.dumps(
                 {
                     "session": {
                         "agentSessionId": "agent-session-1",
-                        "status": "running",
-                        "updatedAt": "2026-06-16T12:00:00+00:00",
-                        "lastError": None,
+                        "agentTargetId": "local:codex",
+                        "activeTurnId": "turn-1",
+                        "activeTurn": {"turnId": "turn-1", "phase": "running"},
+                        "latestTurn": {"turnId": "turn-0", "phase": "settled", "outcome": "completed"},
+                        "pendingInteractions": [],
                         "provider": "codex",
                         "runtimeContext": {
                             "skills": [{"name": "skill-a", "description": "x" * 5000}],
@@ -1730,9 +1769,10 @@ class AgentGetLogCompactionTest(unittest.TestCase):
                 },
             )
             self.assertIn('"agentSessionId": "agent-session-1"', compacted)
-            self.assertIn('"status": "running"', compacted)
-            self.assertIn('"updatedAt": "2026-06-16T12:00:00+00:00"', compacted)
-            self.assertIn('"lastError": null', compacted)
+            self.assertIn('"agentTargetId": "local:codex"', compacted)
+            self.assertIn('"activeTurnId": "turn-1"', compacted)
+            self.assertIn('"phase": "running"', compacted)
+            self.assertIn('"outcome": "completed"', compacted)
             self.assertNotIn("skill-a", compacted)
             summary_json = compacted.split("[automation] stdout compacted:", 1)[0]
             self.assertNotIn("runtimeContext", summary_json)
@@ -1804,238 +1844,140 @@ class AgentGetLogCompactionTest(unittest.TestCase):
             self.assertNotIn("[automation] stdout compacted:", log_text)
 
 
-class AgentSessionSummaryTest(unittest.TestCase):
-    def test_agent_session_messages_uses_session_summary_command(self):
+class AgentWaitProtocolTest(unittest.TestCase):
+    def test_wait_uses_current_cli_protocol_and_returns_final_message(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
-            completed = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=json.dumps(
-                    {
-                        "messages": [
-                            {
-                                "role": "assistant",
-                                "version": 2,
-                                "text": "Finished normally.",
-                            }
-                        ]
-                    }
-                ),
-                stderr="",
-            )
+            payload = {
+                "agentSessionId": "agent-session-1",
+                "turnId": "turn-1",
+                "session": {
+                    "agentSessionId": "agent-session-1",
+                    "agentTargetId": "local:codex",
+                    "provider": "codex",
+                    "activeTurnId": None,
+                    "latestTurn": {"turnId": "turn-1", "phase": "settled", "outcome": "completed"},
+                },
+                "reason": "completed",
+                "timedOut": False,
+                "finalMessage": {"turnId": "turn-1", "text": "Done."},
+            }
 
-            with mock.patch.object(module.subprocess, "run", return_value=completed) as run_mock:
-                messages = module.agent_session_messages("agent-session-1")
+            with mock.patch.object(module, "run_tutti_cli", return_value=payload) as run_mock:
+                result = module.wait_for_agent_stop(
+                    "agent-session-1",
+                    "local:codex",
+                    "turn-1",
+                )
 
-            self.assertEqual(
-                messages,
-                [{"role": "assistant", "version": 2, "text": "Finished normally."}],
-            )
-            command = run_mock.call_args.args[0]
-            self.assertEqual(
-                command,
+            self.assertEqual(result, ("succeeded", None, "Done."))
+            run_mock.assert_called_once_with(
                 [
-                    "/usr/local/bin/tutti",
-                    "--json",
                     "agent",
-                    "session-summary",
+                    "wait",
                     "--session-id",
                     "agent-session-1",
-                    "--limit",
-                    "80",
+                    "--timeout-ms",
+                    "2000",
                 ],
+                timeout=30,
+                log_file=None,
             )
 
-    def test_latest_agent_summary_reads_session_summary_text_field(self):
+    def test_wait_timeout_keeps_run_pending(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
-            summary = module.latest_agent_summary_from_messages(
-                [
-                    {"role": "user", "version": 1, "text": "Do the task."},
-                    {"role": "assistant", "version": 2, "text": "All done."},
-                ]
-            )
-            self.assertEqual(summary, "All done.")
-
-    def test_latest_agent_summary_uses_assistant_text_after_tool_call(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            module = load_server_module(Path(temp_dir))
-            summary = module.latest_agent_summary_from_messages(
-                [
-                    {"role": "user", "version": 1, "text": "Do the task."},
-                    {
-                        "kind": "text",
-                        "role": "assistant",
-                        "version": 2,
-                        "text": "I’ll submit the automation run result as success.",
-                    },
-                    {
-                        "kind": "tool_call",
-                        "role": "assistant",
-                        "version": 4,
-                        "text": "tool_call: Bash",
-                    },
-                    {
-                        "kind": "text",
-                        "role": "assistant",
-                        "version": 6,
-                        "text": "All done.",
-                    },
-                ]
-            )
-            self.assertEqual(summary, "All done.")
-
-    def test_latest_agent_summary_ignores_process_text_before_tool_call(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            module = load_server_module(Path(temp_dir))
-            summary = module.latest_agent_summary_from_messages(
-                [
-                    {"role": "user", "version": 1, "text": "Do the task."},
-                    {
-                        "kind": "text",
-                        "role": "assistant",
-                        "version": 2,
-                        "text": "Understood. I’ll report the status now and then reply.",
-                    },
-                    {
-                        "kind": "tool_call",
-                        "role": "assistant",
-                        "version": 4,
-                        "text": "tool_call: Bash",
-                    },
-                ]
-            )
-            self.assertIsNone(summary)
-
-    def test_wait_for_final_agent_summary_waits_for_text_after_tool_call(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            module = load_server_module(Path(temp_dir))
-            responses = [
-                [
-                    {
-                        "kind": "text",
-                        "role": "assistant",
-                        "version": 2,
-                        "text": "Understood. I’ll report the status now.",
-                    },
-                    {
-                        "kind": "tool_call",
-                        "role": "assistant",
-                        "version": 4,
-                        "text": "tool_call: Bash",
-                    },
-                ],
-                [
-                    {
-                        "kind": "text",
-                        "role": "assistant",
-                        "version": 2,
-                        "text": "Understood. I’ll report the status now.",
-                    },
-                    {
-                        "kind": "tool_call",
-                        "role": "assistant",
-                        "version": 4,
-                        "text": "tool_call: Bash",
-                    },
-                    {
-                        "kind": "text",
-                        "role": "assistant",
-                        "version": 6,
-                        "text": "Hi.",
-                    },
-                ],
-            ]
-
-            def fake_agent_session_messages(agent_session_id, expected_agent_target_id=None, log_file=None):
-                self.assertEqual(agent_session_id, "agent-session-1")
-                if len(responses) > 1:
-                    return responses.pop(0)
-                return responses[0]
-
-            with (
-                mock.patch.object(module, "agent_session_messages", fake_agent_session_messages),
-                mock.patch.object(module, "FINAL_SUMMARY_GRACE_SECONDS", 1),
-                mock.patch.object(module, "FINAL_SUMMARY_POLL_SECONDS", 0.01),
+            with mock.patch.object(
+                module,
+                "run_tutti_cli",
+                return_value={
+                    "reason": "wait_timeout",
+                    "timedOut": True,
+                    "executionContinues": True,
+                },
             ):
-                summary = module.wait_for_final_agent_summary("agent-session-1")
+                result = module.wait_for_agent_stop(
+                    "agent-session-1",
+                    "local:codex",
+                    "turn-1",
+                )
+            self.assertEqual(result, (None, None, None))
 
-            self.assertEqual(summary, "Hi.")
-
-    def test_run_keeps_success_when_agent_summary_fetch_fails(self):
+    def test_wait_rejects_a_different_terminal_turn(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
-            run = make_run(module, "queued")
-            automation = module.STORE.get_automation(run["automationId"])
-
-            def fake_get_agent_session(agent_session_id, expected_agent_target_id=None, log_file=None):
-                module.complete_run_from_cli({"run-id": run["id"], "status": "success"})
-                return {"status": "ready"}
-
             with (
                 mock.patch.object(
                     module,
-                    "start_agent_session",
-                    return_value={"agentSessionId": "agent-session-1", "agentTargetId": "local:codex", "provider": "codex"},
+                    "run_tutti_cli",
+                    return_value={
+                        "turnId": "turn-other",
+                        "reason": "completed",
+                        "session": {
+                            "agentSessionId": "agent-session-1",
+                            "agentTargetId": "local:codex",
+                        },
+                    },
                 ),
-                mock.patch.object(module, "open_agent_session"),
-                mock.patch.object(module, "get_agent_session", side_effect=fake_get_agent_session),
-                mock.patch.object(
-                    module,
-                    "latest_agent_summary",
-                    side_effect=RuntimeError("unknown command: agent session messages"),
-                ),
+                self.assertRaisesRegex(RuntimeError, "returned turn turn-other, expected turn-1"),
             ):
-                module.Runner(module.STORE).run(run["id"], automation)
+                module.wait_for_agent_stop(
+                    "agent-session-1",
+                    "local:codex",
+                    "turn-1",
+                )
 
-            stored = module.STORE.get_run(run["id"])
-            self.assertEqual(stored["runStatus"], "succeeded")
-            self.assertEqual(stored["taskStatus"], "success")
-            self.assertIsNone(stored["summary"])
-            self.assertIsNone(stored["error"])
+    def test_wait_maps_all_non_success_stop_reasons(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            cases = {
+                "failed": ("failed", None),
+                "canceled": ("canceled", "Canceled by user."),
+                "waiting_approval": ("failed", module.APPROVAL_REQUIRED_ERROR),
+                "waiting_input": ("failed", module.INPUT_REQUIRED_ERROR),
+                "waiting": ("failed", module.WAITING_AGENT_ERROR),
+            }
+            for reason, expected in cases.items():
+                with self.subTest(reason=reason), mock.patch.object(
+                    module,
+                    "run_tutti_cli",
+                    return_value={
+                        "turnId": "turn-1",
+                        "reason": reason,
+                        "session": {
+                            "agentSessionId": "agent-session-1",
+                            "agentTargetId": "local:codex",
+                        },
+                    },
+                ):
+                    status, error, summary = module.wait_for_agent_stop(
+                        "agent-session-1",
+                        "local:codex",
+                        "turn-1",
+                    )
+                    self.assertEqual((status, error), expected)
+                    self.assertIsNone(summary)
+
+    def test_cancel_uses_exact_turn_command(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            with mock.patch.object(module, "run_tutti_cli") as run_mock:
+                module.cancel_agent_turn("agent-session-1", "turn-1")
+            run_mock.assert_called_once_with(
+                [
+                    "agent",
+                    "cancel-turn",
+                    "--session-id",
+                    "agent-session-1",
+                    "--turn-id",
+                    "turn-1",
+                ],
+                timeout=30,
+                log_file=None,
+            )
 
 
 class RunCompletionTest(unittest.TestCase):
-    def test_agent_status_classification_treats_created_as_initial(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            module = load_server_module(Path(temp_dir))
-
-            self.assertEqual(module.terminal_agent_status("ready"), ("succeeded", None))
-            self.assertEqual(module.terminal_agent_status("idle"), ("succeeded", None))
-            self.assertEqual(module.terminal_agent_status("created"), (None, None))
-            self.assertTrue(module.initial_agent_status("created"))
-
-    def test_turn_lifecycle_status_classification(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            module = load_server_module(Path(temp_dir))
-
-            self.assertEqual(
-                module.turn_lifecycle_agent_status(
-                    {"phase": "running", "activeTurnId": "turn-1"}
-                ),
-                (None, None, True),
-            )
-            self.assertEqual(
-                module.turn_lifecycle_agent_status(
-                    {"phase": "waiting_approval", "activeTurnId": "turn-1"}
-                ),
-                ("failed", module.APPROVAL_REQUIRED_ERROR, True),
-            )
-            self.assertEqual(
-                module.turn_lifecycle_agent_status({"phase": "settled", "outcome": "completed"}),
-                ("succeeded", None, True),
-            )
-            self.assertEqual(
-                module.turn_lifecycle_agent_status({"phase": "settled", "outcome": "failed"}),
-                ("failed", None, True),
-            )
-            self.assertEqual(
-                module.turn_lifecycle_agent_status({"phase": "settled", "outcome": "canceled"}),
-                ("canceled", "Canceled by user.", True),
-            )
-            self.assertEqual(module.turn_lifecycle_agent_status(None), (None, None, False))
-
     def test_complete_run_updates_running_run_task_status(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
@@ -2077,175 +2019,139 @@ class RunCompletionTest(unittest.TestCase):
             self.assertEqual(stored["runStatus"], "succeeded")
             self.assertIsNone(stored["taskStatus"])
 
-    def test_runner_ignores_initial_created_status_until_agent_responds(self):
+    def test_runner_uses_wait_terminal_result_and_final_message(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
             run = make_run(module, "queued", trigger="schedule")
             automation = module.STORE.get_automation(run["automationId"])
-            polls = []
-            message_reads = []
 
-            def fake_get_agent_session(agent_session_id, expected_agent_target_id=None, log_file=None):
-                polls.append(agent_session_id)
-                if len(polls) == 1:
-                    return {"status": "created"}
-                if len(polls) == 2:
-                    return {"status": "running"}
+            def fake_wait(agent_session_id, expected_agent_target_id, expected_turn_id, log_file=None):
+                self.assertEqual(agent_session_id, "agent-session-1")
+                self.assertEqual(expected_agent_target_id, "local:codex")
+                self.assertEqual(expected_turn_id, "turn-1")
                 module.complete_run_from_cli({"run-id": run["id"], "status": "success"})
-                return {"status": "ready"}
-
-            def fake_agent_session_messages(agent_session_id, expected_agent_target_id=None, log_file=None):
-                message_reads.append(agent_session_id)
-                if len(message_reads) == 1:
-                    return [
-                        {
-                            "role": "user",
-                            "version": 1,
-                            "text": "Review",
-                        }
-                    ]
-                return [
-                    {
-                        "role": "assistant",
-                        "version": 2,
-                        "text": "Done.",
-                    }
-                ]
+                return "succeeded", None, "Done."
 
             with (
                 mock.patch.object(
                     module,
                     "start_agent_session",
-                    return_value={"agentSessionId": "agent-session-1", "agentTargetId": "local:codex", "provider": "codex"},
+                    return_value={
+                        "agentSessionId": "agent-session-1",
+                        "turnId": "turn-1",
+                        "agentTargetId": "local:codex",
+                        "provider": "codex",
+                    },
                 ),
                 mock.patch.object(module, "open_agent_session"),
-                mock.patch.object(module, "get_agent_session", side_effect=fake_get_agent_session),
-                mock.patch.object(module, "agent_session_messages", side_effect=fake_agent_session_messages),
-                mock.patch.object(module.time, "sleep", return_value=None),
+                mock.patch.object(module, "wait_for_agent_stop", side_effect=fake_wait),
             ):
                 module.Runner(module.STORE).run(run["id"], automation)
 
             stored = module.STORE.get_run(run["id"])
-            self.assertEqual(len(polls), 3)
             self.assertEqual(stored["runStatus"], "succeeded")
             self.assertEqual(stored["taskStatus"], "success")
             self.assertEqual(stored["summary"], "Done.")
 
-    def test_runner_waits_for_active_turn_lifecycle_before_ready_status(self):
+    def test_runner_retries_after_wait_timeout(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
             run = make_run(module, "queued", trigger="schedule")
             automation = module.STORE.get_automation(run["automationId"])
-            polls = []
+            waits = []
 
-            def fake_get_agent_session(agent_session_id, expected_agent_target_id=None, log_file=None):
-                polls.append(agent_session_id)
-                if len(polls) == 1:
-                    return {
-                        "status": "ready",
-                        "turnLifecycle": {"phase": "running", "activeTurnId": "turn-1"},
-                    }
+            def fake_wait(*_args, **_kwargs):
+                waits.append(True)
+                if len(waits) == 1:
+                    return None, None, None
                 module.complete_run_from_cli({"run-id": run["id"], "status": "success"})
-                return {
-                    "status": "ready",
-                    "turnLifecycle": {"phase": "settled", "outcome": "completed"},
-                }
+                return "succeeded", None, "Done."
 
             with (
                 mock.patch.object(
                     module,
                     "start_agent_session",
-                    return_value={"agentSessionId": "agent-session-1", "agentTargetId": "local:codex", "provider": "codex"},
+                    return_value={
+                        "agentSessionId": "agent-session-1",
+                        "turnId": "turn-1",
+                        "agentTargetId": "local:codex",
+                        "provider": "codex",
+                    },
                 ),
                 mock.patch.object(module, "open_agent_session"),
-                mock.patch.object(module, "get_agent_session", side_effect=fake_get_agent_session),
-                mock.patch.object(
-                    module,
-                    "agent_session_messages",
-                    return_value=[
-                        {
-                            "role": "assistant",
-                            "version": 1,
-                            "text": "Done.",
-                        }
-                    ],
-                ),
-                mock.patch.object(module.time, "sleep", return_value=None),
+                mock.patch.object(module, "wait_for_agent_stop", side_effect=fake_wait),
             ):
                 module.Runner(module.STORE).run(run["id"], automation)
 
             stored = module.STORE.get_run(run["id"])
-            self.assertEqual(len(polls), 2)
+            self.assertEqual(len(waits), 2)
             self.assertEqual(stored["runStatus"], "succeeded")
             self.assertEqual(stored["taskStatus"], "success")
             self.assertEqual(stored["summary"], "Done.")
 
-    def test_runner_fails_approval_wait_even_with_active_turn_lifecycle(self):
+    def test_runner_fails_when_wait_requires_approval(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
             run = make_run(module, "queued", trigger="schedule")
             automation = module.STORE.get_automation(run["automationId"])
-            polls = []
-
-            def fake_get_agent_session(agent_session_id, expected_agent_target_id=None, log_file=None):
-                polls.append(agent_session_id)
-                return {
-                    "status": "waiting_approval",
-                    "turnLifecycle": {"phase": "waiting", "activeTurnId": "turn-1"},
-                }
 
             with (
                 mock.patch.object(
                     module,
                     "start_agent_session",
-                    return_value={"agentSessionId": "agent-session-1", "agentTargetId": "local:codex", "provider": "codex"},
+                    return_value={
+                        "agentSessionId": "agent-session-1",
+                        "turnId": "turn-1",
+                        "agentTargetId": "local:codex",
+                        "provider": "codex",
+                    },
                 ),
                 mock.patch.object(module, "open_agent_session"),
-                mock.patch.object(module, "get_agent_session", side_effect=fake_get_agent_session),
-                mock.patch.object(module, "agent_session_messages", return_value=[]),
-                mock.patch.object(module.time, "sleep", return_value=None),
+                mock.patch.object(
+                    module,
+                    "wait_for_agent_stop",
+                    return_value=("failed", module.APPROVAL_REQUIRED_ERROR, None),
+                ),
             ):
                 module.Runner(module.STORE).run(run["id"], automation)
 
             stored = module.STORE.get_run(run["id"])
-            self.assertEqual(len(polls), 1)
             self.assertEqual(stored["runStatus"], "failed")
             self.assertEqual(stored["taskStatus"], "fail")
             self.assertEqual(stored["error"], module.APPROVAL_REQUIRED_ERROR)
 
-    def test_runner_times_out_active_turn_and_cancels_agent_session(self):
+    def test_runner_times_out_and_cancels_exact_turn(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
             run = make_run(module, "queued", trigger="schedule")
             automation = module.STORE.get_automation(run["automationId"])
-            polls = []
-
-            def fake_get_agent_session(agent_session_id, expected_agent_target_id=None, log_file=None):
-                polls.append(agent_session_id)
-                return {
-                    "status": "running",
-                    "turnLifecycle": {"phase": "running", "activeTurnId": "turn-1"},
-                }
 
             with (
                 mock.patch.object(
                     module,
                     "start_agent_session",
-                    return_value={"agentSessionId": "agent-session-1", "agentTargetId": "local:codex", "provider": "codex"},
+                    return_value={
+                        "agentSessionId": "agent-session-1",
+                        "turnId": "turn-1",
+                        "agentTargetId": "local:codex",
+                        "provider": "codex",
+                    },
                 ),
                 mock.patch.object(module, "open_agent_session"),
-                mock.patch.object(module, "get_agent_session", side_effect=fake_get_agent_session),
-                mock.patch.object(module, "cancel_agent_session") as cancel_mock,
+                mock.patch.object(
+                    module,
+                    "wait_for_agent_stop",
+                    return_value=(None, None, None),
+                ),
+                mock.patch.object(module, "cancel_agent_turn") as cancel_mock,
                 mock.patch.object(module, "RUN_TIMEOUT_SECONDS", 1),
                 mock.patch.object(module, "run_has_timed_out", side_effect=[False, True]),
-                mock.patch.object(module, "latest_agent_summary", return_value=None),
-                mock.patch.object(module.time, "sleep", return_value=None),
             ):
                 module.Runner(module.STORE).run(run["id"], automation)
 
             stored = module.STORE.get_run(run["id"])
-            self.assertEqual(polls, ["agent-session-1"])
-            cancel_mock.assert_called_once_with("agent-session-1")
+            cancel_mock.assert_called_once()
+            self.assertEqual(cancel_mock.call_args.args[:2], ("agent-session-1", "turn-1"))
             self.assertEqual(stored["runStatus"], "timed_out")
             self.assertEqual(stored["taskStatus"], "fail")
             self.assertEqual(stored["error"], module.run_timeout_error(1))
@@ -2306,21 +2212,19 @@ class RunCompletionTest(unittest.TestCase):
                 mock.patch.object(
                     module,
                     "start_agent_session",
-                    return_value={"agentSessionId": "agent-session-1", "agentTargetId": "local:codex", "provider": "codex"},
+                    return_value={
+                        "agentSessionId": "agent-session-1",
+                        "turnId": "turn-1",
+                        "agentTargetId": "local:codex",
+                        "provider": "codex",
+                    },
                 ),
                 mock.patch.object(module, "open_agent_session"),
-                mock.patch.object(module, "get_agent_session", return_value={"status": "ready"}),
                 mock.patch.object(module, "COMPLETION_GRACE_SECONDS", 0),
                 mock.patch.object(
                     module,
-                    "agent_session_messages",
-                    return_value=[
-                        {
-                            "role": "assistant",
-                            "version": 1,
-                            "payload": {"text": "Finished normally."},
-                        }
-                    ],
+                    "wait_for_agent_stop",
+                    return_value=("succeeded", None, "Finished normally."),
                 ),
             ):
                 module.Runner(module.STORE).run(run["id"], automation)
@@ -2341,31 +2245,25 @@ class RunCompletionTest(unittest.TestCase):
             automation = module.STORE.get_automation(run["automationId"])
             ready_seen = threading.Event()
 
-            def fake_get_agent_session(agent_session_id, expected_agent_target_id=None, log_file=None):
+            def fake_wait(*_args, **_kwargs):
                 ready_seen.set()
-                return {"status": "ready"}
+                return "succeeded", None, "Nothing to do."
 
             with (
                 mock.patch.object(
                     module,
                     "start_agent_session",
-                    return_value={"agentSessionId": "agent-session-1", "agentTargetId": "local:codex", "provider": "codex"},
+                    return_value={
+                        "agentSessionId": "agent-session-1",
+                        "turnId": "turn-1",
+                        "agentTargetId": "local:codex",
+                        "provider": "codex",
+                    },
                 ),
                 mock.patch.object(module, "open_agent_session"),
-                mock.patch.object(module, "get_agent_session", fake_get_agent_session),
+                mock.patch.object(module, "wait_for_agent_stop", fake_wait),
                 mock.patch.object(module, "COMPLETION_GRACE_SECONDS", 2),
                 mock.patch.object(module, "COMPLETION_GRACE_POLL_SECONDS", 0.05),
-                mock.patch.object(
-                    module,
-                    "agent_session_messages",
-                    return_value=[
-                        {
-                            "role": "assistant",
-                            "version": 1,
-                            "payload": {"text": "Nothing to do."},
-                        }
-                    ],
-                ),
             ):
                 thread = threading.Thread(
                     target=module.Runner(module.STORE).run,

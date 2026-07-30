@@ -27,9 +27,8 @@ LEGACY_TIMEOUT_SECONDS = 0
 MISSING_TASK_STATUS_ERROR = "Automation task did not submit a task status."
 COMPLETION_GRACE_SECONDS = int(os.environ.get("TUTTI_AUTOMATION_COMPLETION_GRACE_SECONDS", "60") or "60")
 COMPLETION_GRACE_POLL_SECONDS = 0.5
-FINAL_SUMMARY_GRACE_SECONDS = int(os.environ.get("TUTTI_AUTOMATION_FINAL_SUMMARY_GRACE_SECONDS", "10") or "10")
-FINAL_SUMMARY_POLL_SECONDS = 0.5
 RUN_TIMEOUT_SECONDS = int(os.environ.get("TUTTI_AUTOMATION_RUN_TIMEOUT_SECONDS", "1800") or "1800")
+AGENT_WAIT_POLL_TIMEOUT_MS = 2000
 PROJECT_MARKERS = ("package.json", "go.mod", "pyproject.toml", "Cargo.toml", ".git")
 RESULT_STATUS_VALUES = {"success", "fail", "skip"}
 RUNNER_OPTIONS_COMPOSER_TIMEOUT_SECONDS = float(
@@ -904,17 +903,20 @@ def tutti_cli_command():
     return configured
 
 
-AGENT_GET_POLL_LOG_FIELDS = (
-    "agentSessionId",
-    "status",
-    "turnLifecycle",
-    "submitAvailability",
-    "taskStatus",
-    "updatedAt",
-    "lastError",
-)
 APPROVAL_REQUIRED_ERROR = (
     "Agent requested approval; automation runs cannot wait for interactive approval."
+)
+INPUT_REQUIRED_ERROR = (
+    "Agent requested user input; automation runs cannot wait for interactive input."
+)
+WAITING_AGENT_ERROR = "Agent stopped without an actionable automation result."
+AGENT_GET_LOG_FIELDS = (
+    "agentSessionId",
+    "agentTargetId",
+    "activeTurnId",
+    "activeTurn",
+    "latestTurn",
+    "pendingInteractions",
 )
 AGENT_GET_LOG_OMIT_FIELDS = (
     "runtimeContext",
@@ -948,7 +950,7 @@ def compact_agent_get_log_stdout(stdout_text):
         return stdout_text, None
 
     omitted = [field for field in AGENT_GET_LOG_OMIT_FIELDS if field in session]
-    summary = {field: session.get(field) for field in AGENT_GET_POLL_LOG_FIELDS}
+    summary = {field: session.get(field) for field in AGENT_GET_LOG_FIELDS}
     compact_json = json.dumps(summary, ensure_ascii=False, indent=2)
     omitted_text = ",".join(omitted) if omitted else "none"
     meta_line = (
@@ -1081,11 +1083,12 @@ def start_agent_session(automation, run, log_file):
             duplicate_flags,
         )
     )
-    session = run_tutti_cli(
+    result = run_tutti_cli(
         args,
         timeout=60,
         log_file=log_file,
-    ).get("session") or {}
+    )
+    session = result.get("session") or {}
     assert_session_agent_target(
         session,
         agent_target_id,
@@ -1094,6 +1097,7 @@ def start_agent_session(automation, run, log_file):
     )
     return {
         **session,
+        "turnId": clean_optional_string(result.get("turnId")),
         "agentTargetId": agent_target_id,
         "provider": provider_id,
         "_automationCliContract": cli_contract,
@@ -1102,7 +1106,7 @@ def start_agent_session(automation, run, log_file):
 
 def get_agent_session(agent_session_id, expected_agent_target_id=None, log_file=None):
     session = run_tutti_cli(
-        ["agent", "get", "--session-id", agent_session_id],
+        ["agent", "get", "--session-id", agent_session_id, "--view", "session"],
         timeout=30,
         log_file=log_file,
     ).get("session") or {}
@@ -1164,10 +1168,38 @@ def resolve_run_agent_target_id(run):
     return target["agentTargetId"]
 
 
-def cancel_agent_session(agent_session_id):
+def cancel_agent_turn(agent_session_id, turn_id, log_file=None):
+    if not agent_session_id or not turn_id:
+        return
+    run_tutti_cli(
+        [
+            "agent",
+            "cancel-turn",
+            "--session-id",
+            agent_session_id,
+            "--turn-id",
+            turn_id,
+        ],
+        timeout=30,
+        log_file=log_file,
+    )
+
+
+def cancel_active_agent_turn(
+    agent_session_id,
+    expected_agent_target_id=None,
+    log_file=None,
+):
     if not agent_session_id:
         return
-    run_tutti_cli(["agent", "cancel", "--session-id", agent_session_id], timeout=30)
+    session = get_agent_session(
+        agent_session_id,
+        expected_agent_target_id,
+        log_file=log_file,
+    )
+    turn_id = clean_optional_string(session.get("activeTurnId"))
+    if turn_id:
+        cancel_agent_turn(agent_session_id, turn_id, log_file=log_file)
 
 
 def open_agent_session(agent_session_id, expected_agent_target_id=None, log_file=None):
@@ -1203,216 +1235,72 @@ def open_manual_agent_session_with_retries(agent_session_id, expected_agent_targ
         raise last_error
 
 
-def agent_session_messages(agent_session_id, expected_agent_target_id=None, log_file=None):
+def wait_for_agent_stop(
+    agent_session_id,
+    expected_agent_target_id,
+    expected_turn_id,
+    log_file=None,
+):
     result = run_tutti_cli(
-        ["agent", "session-summary", "--session-id", agent_session_id, "--limit", "80"],
+        [
+            "agent",
+            "wait",
+            "--session-id",
+            agent_session_id,
+            "--timeout-ms",
+            str(AGENT_WAIT_POLL_TIMEOUT_MS),
+        ],
         timeout=30,
         log_file=log_file,
     )
-    if expected_agent_target_id:
-        assert_session_agent_target(result.get("session") or {}, expected_agent_target_id)
-    return result.get("messages") or []
-
-
-def latest_agent_summary(agent_session_id, expected_agent_target_id=None, log_file=None):
-    return latest_agent_summary_from_messages(
-        agent_session_messages(
-            agent_session_id,
-            expected_agent_target_id,
-            log_file=log_file,
-        )
-    )
-
-
-def wait_for_final_agent_summary(agent_session_id, expected_agent_target_id=None, log_file=None):
-    summary = latest_agent_summary(
-        agent_session_id, expected_agent_target_id, log_file=log_file
-    )
-    if summary or FINAL_SUMMARY_GRACE_SECONDS <= 0:
-        return summary
-    if log_file:
-        log_file.write(
-            f"[automation] waiting up to {FINAL_SUMMARY_GRACE_SECONDS}s for final agent summary\n".encode(
-                "utf-8"
+    session = result.get("session")
+    if isinstance(session, dict):
+        assert_session_agent_target(session, expected_agent_target_id)
+        returned_session_id = clean_optional_string(session.get("agentSessionId"))
+        if returned_session_id != agent_session_id:
+            raise RuntimeError(
+                f"agent wait returned session {returned_session_id or '<none>'}, "
+                f"expected {agent_session_id}"
             )
-        )
-        log_file.flush()
-    deadline = time.time() + FINAL_SUMMARY_GRACE_SECONDS
-    while time.time() < deadline:
-        remaining = max(0, deadline - time.time())
-        time.sleep(min(FINAL_SUMMARY_POLL_SECONDS, remaining))
-        summary = latest_agent_summary(
-            agent_session_id, expected_agent_target_id, log_file=log_file
-        )
-        if summary:
-            return summary
-    return None
-
-
-def latest_agent_summary_from_messages(messages):
-    sorted_messages = sorted(
-        [message for message in messages if isinstance(message, dict)],
-        key=agent_message_order,
-        reverse=True,
-    )
-    latest_tool_order = max(
-        (agent_message_order(message) for message in sorted_messages if is_tool_message(message)),
-        default=None,
-    )
-    for message in sorted_messages:
-        if latest_tool_order is not None and agent_message_order(message) <= latest_tool_order:
-            continue
-        role = str(message.get("role") or "").strip().lower()
-        if role not in {"assistant", "agent"}:
-            continue
-        if is_tool_message(message):
-            continue
-        text = extract_agent_message_text(message)
-        if text:
-            return text
-    if latest_tool_order is not None:
-        return None
-    for message in sorted_messages:
-        if is_tool_message(message):
-            continue
-        text = extract_agent_message_text(message)
-        if text:
-            return text
-    return None
-
-
-def agent_messages_have_response(messages):
-    sorted_messages = sorted(
-        [message for message in messages if isinstance(message, dict)],
-        key=agent_message_order,
-        reverse=True,
-    )
-    latest_tool_order = max(
-        (agent_message_order(message) for message in sorted_messages if is_tool_message(message)),
-        default=None,
-    )
-    for message in sorted_messages:
-        if latest_tool_order is not None and agent_message_order(message) <= latest_tool_order:
-            continue
-        if not isinstance(message, dict):
-            continue
-        role = str(message.get("role") or "").strip().lower()
-        if role not in {"assistant", "agent"}:
-            continue
-        if is_tool_message(message):
-            continue
-        if extract_agent_message_text(message):
-            return True
-    return False
-
-
-def agent_message_order(message):
-    for key in ("version", "id"):
-        try:
-            return int(message.get(key) or 0)
-        except (TypeError, ValueError):
-            continue
-    return 0
-
-
-def is_tool_message(message):
-    if not isinstance(message, dict):
-        return False
-    kind = str(message.get("kind") or "").strip().lower()
-    if kind.startswith("tool") or kind in {"function_call", "call"}:
-        return True
-    text = extract_message_text(message.get("text")) or ""
-    return text.strip().lower().startswith("tool_call:")
-
-
-def extract_agent_message_text(message):
-    if not isinstance(message, dict):
-        return None
-    text = extract_message_text(message.get("text"))
-    if text:
-        return text
-    return extract_message_text(message.get("payload"))
-
-
-def extract_message_text(value):
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value.strip() or None
-    if isinstance(value, list):
-        parts = [extract_message_text(item) for item in value]
-        text = "\n".join(part for part in parts if part)
-        return text.strip() or None
-    if isinstance(value, dict):
-        for key in ("content", "text", "markdown", "message"):
-            text = extract_message_text(value.get(key))
-            if text:
-                return text
-        if "parts" in value:
-            text = extract_message_text(value.get("parts"))
-            if text:
-                return text
-        if "items" in value:
-            text = extract_message_text(value.get("items"))
-            if text:
-                return text
-        return None
-    return str(value).strip() or None
-
-
-def terminal_agent_status(status):
-    value = str(status or "").strip().lower()
-    if value in {"completed", "idle", "ready"}:
-        return "succeeded", None
-    if value == "failed":
-        return "failed", None
-    if value in {"waiting_approval", "awaiting_approval"}:
-        return "failed", APPROVAL_REQUIRED_ERROR
-    if value in {"canceled", "cancelled"}:
-        return "canceled", "Canceled by user."
-    return None, None
-
-
-APPROVAL_TURN_LIFECYCLE_PHASES = {"waiting_approval", "awaiting_approval"}
-ACTIVE_TURN_LIFECYCLE_PHASES = {
-    "submitted",
-    "running",
-    "working",
-    "streaming",
-    "in_progress",
-    "waiting",
-    "waiting_input",
-}
-SETTLED_TURN_LIFECYCLE_PHASES = {"settled", "completed", "complete", "finished", "done"}
-FAILED_TURN_LIFECYCLE_OUTCOMES = {"failed", "failure", "error"}
-CANCELED_TURN_LIFECYCLE_OUTCOMES = {"canceled", "cancelled", "interrupted"}
-
-
-def turn_lifecycle_agent_status(turn_lifecycle):
-    if not isinstance(turn_lifecycle, dict):
-        return None, None, False
-
-    phase = clean_optional_string(turn_lifecycle.get("phase")).lower()
-    active_turn_id = clean_optional_string(turn_lifecycle.get("activeTurnId"))
-    if phase in {"failed"}:
-        return "failed", None, True
-    if phase in {"canceled", "cancelled"}:
-        return "canceled", "Canceled by user.", True
-    if phase in APPROVAL_TURN_LIFECYCLE_PHASES:
-        return "failed", APPROVAL_REQUIRED_ERROR, True
-    if phase in ACTIVE_TURN_LIFECYCLE_PHASES or (
-        active_turn_id and phase not in SETTLED_TURN_LIFECYCLE_PHASES
+    reason = clean_optional_string(result.get("reason")).lower()
+    if (
+        reason == "wait_timeout"
+        and result.get("timedOut") is True
+        and result.get("executionContinues") is True
     ):
-        return None, None, True
-    if phase in SETTLED_TURN_LIFECYCLE_PHASES:
-        outcome = clean_optional_string(turn_lifecycle.get("outcome")).lower()
-        if outcome in FAILED_TURN_LIFECYCLE_OUTCOMES:
-            return "failed", None, True
-        if outcome in CANCELED_TURN_LIFECYCLE_OUTCOMES:
-            return "canceled", "Canceled by user.", True
-        return "succeeded", None, True
+        return None, None, None
 
-    return None, None, False
+    turn_id = clean_optional_string(result.get("turnId"))
+    if turn_id != expected_turn_id:
+        raise RuntimeError(
+            f"agent wait returned turn {turn_id or '<none>'}, expected {expected_turn_id}"
+        )
+    final_message = result.get("finalMessage")
+    if isinstance(final_message, dict):
+        final_message_turn_id = clean_optional_string(final_message.get("turnId"))
+        if final_message_turn_id != expected_turn_id:
+            raise RuntimeError(
+                f"agent wait final message belongs to turn "
+                f"{final_message_turn_id or '<none>'}, expected {expected_turn_id}"
+            )
+    summary = (
+        clean_optional_string(final_message.get("text"))
+        if isinstance(final_message, dict)
+        else None
+    )
+    if reason == "completed":
+        return "succeeded", None, summary
+    if reason == "failed":
+        return "failed", None, summary
+    if reason == "canceled":
+        return "canceled", "Canceled by user.", summary
+    if reason == "waiting_approval":
+        return "failed", APPROVAL_REQUIRED_ERROR, summary
+    if reason == "waiting_input":
+        return "failed", INPUT_REQUIRED_ERROR, summary
+    if reason == "waiting":
+        return "failed", WAITING_AGENT_ERROR, summary
+    raise RuntimeError(f"agent wait returned unsupported reason: {reason or '<empty>'}")
 
 
 def run_has_timed_out(started_at, timeout_seconds):
@@ -1421,10 +1309,6 @@ def run_has_timed_out(started_at, timeout_seconds):
 
 def run_timeout_error(timeout_seconds):
     return f"Automation run timed out after {timeout_seconds} seconds."
-
-
-def initial_agent_status(status):
-    return str(status or "").strip().lower() == "created"
 
 
 def clean_env(value):
@@ -2235,7 +2119,10 @@ class Runner:
             run["runStatus"] = "canceling"
             self.store.save_run(run)
             try:
-                cancel_agent_session(run["agentSessionId"])
+                cancel_active_agent_turn(
+                    run["agentSessionId"],
+                    run.get("agentTargetId"),
+                )
             except Exception as exc:
                 run["error"] = str(exc)
                 self.store.save_run(run)
@@ -2319,6 +2206,9 @@ class Runner:
                 agent_session_id = clean_optional_string(session.get("agentSessionId"))
                 if not agent_session_id:
                     raise RuntimeError("agent session was not created")
+                agent_turn_id = clean_optional_string(session.get("turnId"))
+                if not agent_turn_id:
+                    raise RuntimeError("agent session did not return its initial turn id")
                 agent_target_id = clean_agent_target_id(run.get("agentTargetId"))
                 agent_provider = normalize_provider_id(run.get("agentProvider"))
                 if not agent_target_id or not agent_provider:
@@ -2339,7 +2229,11 @@ class Runner:
                     latest = self.store.get_run(id_)
                     if latest and latest["runStatus"] == "canceling":
                         try:
-                            cancel_agent_session(agent_session_id)
+                            cancel_agent_turn(
+                                agent_session_id,
+                                agent_turn_id,
+                                log_file=log_file,
+                            )
                         except Exception:
                             pass
                         status = "canceled"
@@ -2347,7 +2241,11 @@ class Runner:
                         break
                     if run_has_timed_out(started, timeout_seconds):
                         try:
-                            cancel_agent_session(agent_session_id)
+                            cancel_agent_turn(
+                                agent_session_id,
+                                agent_turn_id,
+                                log_file=log_file,
+                            )
                         except Exception as exc:
                             log_file.write(
                                 f"[automation] failed to cancel timed-out agent session: {exc}\n".encode(
@@ -2358,41 +2256,16 @@ class Runner:
                         status = "timed_out"
                         error = run_timeout_error(timeout_seconds)
                         break
-                    session = get_agent_session(
+                    status, error, wait_summary = wait_for_agent_stop(
                         agent_session_id,
                         agent_target_id,
+                        agent_turn_id,
                         log_file=log_file,
                     )
-                    status, error = terminal_agent_status(session.get("status"))
-                    if status in {"failed", "canceled"}:
-                        break
-                    lifecycle_status, lifecycle_error, has_turn_lifecycle = turn_lifecycle_agent_status(
-                        session.get("turnLifecycle")
-                    )
-                    if lifecycle_status:
-                        status = lifecycle_status
-                        error = lifecycle_error
-                        break
-                    if has_turn_lifecycle:
-                        time.sleep(2)
+                    if status is None:
                         continue
-                    if status:
-                        break
-                    if initial_agent_status(session.get("status")):
-                        latest = self.store.get_run(id_)
-                        if latest and latest.get("taskStatus"):
-                            status = "succeeded"
-                            break
-                        messages = agent_session_messages(
-                            agent_session_id,
-                            agent_target_id,
-                            log_file=log_file,
-                        )
-                        if agent_messages_have_response(messages):
-                            summary = latest_agent_summary_from_messages(messages)
-                            status = "succeeded"
-                            break
-                    time.sleep(2)
+                    summary = wait_summary
+                    break
                 if status == "succeeded":
                     latest = self.wait_for_completion_status(
                         id_,
@@ -2401,33 +2274,15 @@ class Runner:
                     )
                     if latest and latest["runStatus"] == "canceling":
                         try:
-                            cancel_agent_session(agent_session_id)
+                            cancel_agent_turn(
+                                agent_session_id,
+                                agent_turn_id,
+                                log_file=log_file,
+                            )
                         except Exception:
                             pass
                         status = "canceled"
                         error = "Canceled by user."
-                try:
-                    latest_for_summary = self.store.get_run(id_)
-                    if latest_for_summary and latest_for_summary.get("taskStatus"):
-                        final_summary = wait_for_final_agent_summary(
-                            agent_session_id,
-                            agent_target_id,
-                            log_file=log_file,
-                        )
-                        if final_summary is not None:
-                            summary = final_summary
-                    elif summary is None:
-                        summary = latest_agent_summary(
-                            agent_session_id,
-                            agent_target_id,
-                            log_file=log_file,
-                        )
-                except Exception as exc:
-                    if log_file:
-                        log_file.write(
-                            f"[automation] failed to fetch agent summary: {exc}\n".encode("utf-8")
-                        )
-                        log_file.flush()
         except Exception as exc:
             status = "failed"
             error = str(exc)
