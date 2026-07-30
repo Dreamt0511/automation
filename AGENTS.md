@@ -113,3 +113,13 @@ then follow `agent wait --json` until its reason reaches a stop point. Use
 `finalMessage.text` as the run summary and `agent cancel-turn` with that exact
 Turn identity for cancellation. Do not infer completion from deprecated
 Session `status`/`turnLifecycle` fields or `agent session-summary`.
+
+### Agent working directory
+
+Default Agent execution to the app-managed runtime `agent-workspace`; do not
+restore a dependency on `TUTTI_WORKSPACE_ROOT`. Explicit cwd values may point
+to any existing directory. Resolve relative values from `agent-workspace`, and
+canonicalize plus revalidate every cwd when saving, enqueueing, and launching.
+Populate cwd choices from the app-managed directory plus
+`tuttiExternal.userProjects.list()`; registered Tutti projects, rather than
+filesystem scanning, own the project choices shown by the desktop UI.

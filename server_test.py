@@ -308,7 +308,7 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
             self.assertEqual(module.cwd_options_payload()["cwd"], str(module.AGENT_WORK_DIR))
             self.assertEqual(module.context_payload()["agentWorkDir"], str(module.AGENT_WORK_DIR))
 
-    def test_explicit_cwd_is_canonical_and_confined_to_agent_workspace(self):
+    def test_explicit_cwd_is_canonical_and_may_use_an_existing_external_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
             explicit_cwd = module.AGENT_WORK_DIR / "project"
@@ -322,13 +322,11 @@ class RunnerOptionsPayloadTest(unittest.TestCase):
             sibling = module.AGENT_WORK_DIR.parent / "outside"
             sibling.mkdir()
             for value in (str(sibling), "../outside"):
-                with self.assertRaisesRegex(ValueError, "must stay inside"):
-                    module.clean_cwd(value)
+                self.assertEqual(module.clean_cwd(value), str(sibling.resolve()))
 
             escape = module.AGENT_WORK_DIR / "escape"
             escape.symlink_to(sibling, target_is_directory=True)
-            with self.assertRaisesRegex(ValueError, "must stay inside"):
-                module.clean_cwd(str(escape))
+            self.assertEqual(module.clean_cwd(str(escape)), str(sibling.resolve()))
 
     def test_runner_options_prefers_runtime_context_model_options(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1224,7 +1222,7 @@ class RunAgentSnapshotTest(unittest.TestCase):
             self.assertEqual(failed["error"], "Agent Target is unavailable")
             self.assertIsNotNone(failed["finishedAt"])
 
-    def test_enqueue_rejects_legacy_persisted_cwd_outside_agent_workspace(self):
+    def test_enqueue_accepts_existing_persisted_cwd_outside_agent_workspace(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
             automation = self.save_automation(module)
@@ -1233,10 +1231,9 @@ class RunAgentSnapshotTest(unittest.TestCase):
             automation["cwd"] = str(outside)
             runner = module.Runner(module.STORE)
 
-            with self.assertRaisesRegex(ValueError, "must stay inside"):
-                runner.enqueue(automation, "schedule")
+            run = self.enqueue_without_worker(module, runner, automation)
 
-            self.assertEqual(module.STORE.list_runs(automation["id"]), [])
+            self.assertEqual(run["cwd"], str(outside.resolve()))
 
     def test_enqueue_rolls_back_durable_queue_when_worker_cannot_start(self):
         with tempfile.TemporaryDirectory() as temp_dir:

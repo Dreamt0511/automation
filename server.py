@@ -833,18 +833,15 @@ def clean_cwd(value):
     value = str(value or AGENT_WORK_DIR).strip()
     if not value:
         raise ValueError("cwd is required")
-    root = AGENT_WORK_DIR.expanduser().resolve()
     path = Path(value).expanduser()
     if not path.is_absolute():
-        path = root / path
+        path = AGENT_WORK_DIR.expanduser().resolve() / path
     try:
         path = path.resolve(strict=True)
     except (FileNotFoundError, OSError):
         raise ValueError("cwd must be an existing directory")
     if not path.is_dir():
         raise ValueError("cwd must be an existing directory")
-    if path != root and root not in path.parents:
-        raise ValueError("cwd must stay inside the app agent workspace")
     return str(path)
 
 
