@@ -27,6 +27,7 @@ import {
   scheduleDraftFromAutomation,
 } from './lib/schedule';
 import { handleAutomationEventMessage } from './lib/automationEvents';
+import { listRegisteredProjects, mergeCwdOptions } from './lib/cwdOptions';
 
 type LoadState = {
   automations: Automation[];
@@ -72,14 +73,21 @@ export function App() {
   }, [inboxFilter, state.runs]);
 
   const loadContextOptions = useCallback(async () => {
-    const [contextResult, cwdOptionsResult] = await Promise.allSettled([
+    const [contextResult, cwdOptionsResult, registeredProjectsResult] = await Promise.allSettled([
       api<AppContext>('/api/context'),
       api<{ directories: CwdOption[] }>('/api/cwd-options'),
+      listRegisteredProjects(),
     ]);
     setState((current) => ({
       ...current,
       context: contextResult.status === 'fulfilled' ? contextResult.value : current.context,
-      cwdOptions: cwdOptionsResult.status === 'fulfilled' ? cwdOptionsResult.value.directories : current.cwdOptions,
+      cwdOptions:
+        cwdOptionsResult.status === 'fulfilled'
+          ? mergeCwdOptions(
+              cwdOptionsResult.value.directories,
+              registeredProjectsResult.status === 'fulfilled' ? registeredProjectsResult.value : [],
+            )
+          : current.cwdOptions,
     }));
   }, []);
 
@@ -145,6 +153,10 @@ export function App() {
     void loadAutomations({ showLoading: true });
     void loadContextOptions();
   }, [loadAutomations, loadContextOptions]);
+
+  useEffect(() => {
+    if (configOpen) void loadContextOptions();
+  }, [configOpen, loadContextOptions]);
 
   useEffect(() => {
     void loadRunnerOptions();

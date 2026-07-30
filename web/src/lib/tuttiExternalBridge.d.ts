@@ -1,4 +1,5 @@
 import type { TuttiExternalAtRichTextBridge } from '@tutti-os/workspace-external-core/rich-text';
+import type { TuttiExternalBridge } from '@tutti-os/workspace-external-core/contracts';
 
 type AutomationTuttiExternalBridge = TuttiExternalAtRichTextBridge & {
   app?: {
@@ -12,6 +13,7 @@ type AutomationTuttiExternalBridge = TuttiExternalAtRichTextBridge & {
       level?: 'debug' | 'info' | 'warn' | 'error';
     }): void;
   };
+  userProjects?: Pick<TuttiExternalBridge['userProjects'], 'list'>;
 };
 
 declare global {

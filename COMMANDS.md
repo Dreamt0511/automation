@@ -50,6 +50,8 @@ Runner arguments:
 - `--permission-mode full-access`
 - `--runner-args "--model <model-id>"`
 - `--env KEY=value,OTHER=value`
+- `--cwd <directory>` accepts an existing absolute directory. Relative paths
+  resolve from the app-managed Agent workspace; omitting it uses that workspace.
 
 Automation app tasks must be persisted with `tutti automation` commands. Do not
 substitute provider-native cron/reminder tools, OS cron/launchd, shell sleep

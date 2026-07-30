@@ -198,6 +198,11 @@ function createMockBridge() {
         }
       },
     },
+    userProjects: {
+      async list() {
+        return { projects: [] };
+      },
+    },
   };
 }
 

@@ -77,7 +77,7 @@
           },
           "cwd": {
             "type": "string",
-            "description": "Working directory inside the app-managed agent workspace. Defaults to that agent workspace."
+            "description": "Existing working directory. Relative paths resolve from the app-managed agent workspace, which is also the default."
           },
           "enabled": {
             "type": "boolean",
@@ -174,7 +174,7 @@
           },
           "cwd": {
             "type": "string",
-            "description": "Working directory inside the app-managed agent workspace."
+            "description": "Existing working directory. Relative paths resolve from the app-managed agent workspace."
           },
           "enabled": {
             "type": "boolean",
