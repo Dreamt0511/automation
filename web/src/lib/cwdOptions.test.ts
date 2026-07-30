@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CwdOption } from '../types';
-import { listRegisteredProjects, mergeCwdOptions } from './cwdOptions';
+import { listRegisteredProjects, mergeCwdOptions, reconcileCwdOptions } from './cwdOptions';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -24,8 +24,18 @@ describe('mergeCwdOptions', () => {
       ]),
     ).toEqual([
       ...appDirectories,
-      { id: 'registered:one', kind: 'project', label: 'One', path: '/projects/one' },
-      { id: 'registered:two', kind: 'project', label: 'Two', path: '/projects/two' },
+      {
+        id: 'registered:one',
+        kind: 'registered-project',
+        label: 'One',
+        path: '/projects/one',
+      },
+      {
+        id: 'registered:two',
+        kind: 'registered-project',
+        label: 'Two',
+        path: '/projects/two',
+      },
     ]);
   });
 
@@ -48,10 +58,47 @@ describe('mergeCwdOptions', () => {
       ...appDirectories,
       {
         id: 'registered:fallback-label',
-        kind: 'project',
+        kind: 'registered-project',
         label: '/projects/fallback',
         path: '/projects/fallback',
       },
+    ]);
+  });
+});
+
+describe('reconcileCwdOptions', () => {
+  const current: CwdOption[] = [
+    {
+      id: 'agent-workspace',
+      kind: 'workspace',
+      label: 'agent-workspace',
+      path: '/runtime/agent-workspace',
+    },
+    { id: 'registered:old', kind: 'registered-project', label: 'Old', path: '/projects/old' },
+  ];
+
+  it('uses fresh registered projects when app directories fail to load', () => {
+    expect(
+      reconcileCwdOptions(current, undefined, [{ id: 'new', label: 'New', path: '/projects/new' }]),
+    ).toEqual([
+      current[0],
+      { id: 'registered:new', kind: 'registered-project', label: 'New', path: '/projects/new' },
+    ]);
+  });
+
+  it('keeps registered projects when app directories load but the bridge fails', () => {
+    const appDirectories = [
+      {
+        id: 'new-workspace',
+        kind: 'workspace',
+        label: 'new-workspace',
+        path: '/runtime/new-workspace',
+      },
+    ];
+
+    expect(reconcileCwdOptions(current, appDirectories, undefined)).toEqual([
+      ...appDirectories,
+      current[1],
     ]);
   });
 });

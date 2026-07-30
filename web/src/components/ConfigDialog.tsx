@@ -81,6 +81,7 @@ export function ConfigDialog({
   const [formError, setFormError] = useState<string | null>(null);
   const [isLoadingAgentOptions, setIsLoadingAgentOptions] = useState(false);
   const customCwdInputRef = useRef<HTMLInputElement>(null);
+  const cwdEditedRef = useRef(false);
   const isRunnerOptionsLoading = isLoadingRunnerOptions || isLoadingAgentOptions;
 
   useEffect(() => {
@@ -93,7 +94,6 @@ export function ConfigDialog({
 
   useEffect(() => {
     const nextRunnerSelection = resolveRunnerSelection(automation, runnerOptions);
-    const nextCwd = automation?.cwd ?? context?.agentWorkDir ?? '';
     const preferredAgentTargetId = resolveAutomationAgentTargetId(automation, runnerOptions);
     const globalAgentTargetId = normalizeText(runnerOptions.agentTargetId);
     const agentCatalogMatches =
@@ -103,15 +103,24 @@ export function ConfigDialog({
     }
     setName(automation?.name ?? (initialTemplate ? t(initialTemplate.nameKey) : ''));
     setPrompt(automation?.prompt ?? (initialTemplate ? t(initialTemplate.promptKey) : ''));
-    setCwd(nextCwd);
-    setCwdCustomMode(!isKnownCwdPath(nextCwd, cwdOptions));
     setAgentTargetId(nextRunnerSelection.agentTargetId);
     setModel(nextRunnerSelection.model);
     setReasoningEffort(nextRunnerSelection.reasoningEffort);
     setPermissionMode(nextRunnerSelection.permissionMode);
     setScheduleOpen(false);
     setFormError(null);
-  }, [automation, context, cwdOptions, initialTemplate, runnerOptions, t]);
+  }, [automation, initialTemplate, runnerOptions, t]);
+
+  useEffect(() => {
+    cwdEditedRef.current = false;
+  }, [automation?.id, initialTemplate]);
+
+  useEffect(() => {
+    if (cwdEditedRef.current) return;
+    const nextCwd = automation?.cwd ?? context?.agentWorkDir ?? '';
+    setCwd(nextCwd);
+    setCwdCustomMode(!isKnownCwdPath(nextCwd, cwdOptions));
+  }, [automation, context?.agentWorkDir, cwdOptions]);
 
   useEffect(() => {
     const preferredAgentTargetId = resolveAutomationAgentTargetId(automation, runnerOptions);
@@ -418,6 +427,7 @@ export function ConfigDialog({
                     { value: CUSTOM_CWD_VALUE, label: t('cwd.customPath') },
                   ]}
                   onValueChange={(value) => {
+                    cwdEditedRef.current = true;
                     if (value === CUSTOM_CWD_VALUE) {
                       setCwdCustomMode(true);
                       window.requestAnimationFrame(() => customCwdInputRef.current?.focus());
@@ -433,7 +443,10 @@ export function ConfigDialog({
                     className="cwd-custom-input"
                     value={cwd}
                     aria-label={t('aria.workingDirectory')}
-                    onChange={(event) => setCwd(event.target.value)}
+                    onChange={(event) => {
+                      cwdEditedRef.current = true;
+                      setCwd(event.target.value);
+                    }}
                   />
                 ) : null}
 
