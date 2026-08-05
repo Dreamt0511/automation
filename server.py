@@ -6,6 +6,7 @@ import shlex
 import signal
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -33,6 +34,12 @@ PROJECT_MARKERS = ("package.json", "go.mod", "pyproject.toml", "Cargo.toml", ".g
 RESULT_STATUS_VALUES = {"success", "fail", "skip"}
 RUNNER_OPTIONS_COMPOSER_TIMEOUT_SECONDS = float(
     os.environ.get("TUTTI_AUTOMATION_RUNNER_OPTIONS_COMPOSER_TIMEOUT_SECONDS", "8") or "8"
+)
+
+EXPECTED_CLIENT_DISCONNECT_ERRORS = (
+    BrokenPipeError,
+    ConnectionAbortedError,
+    ConnectionResetError,
 )
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -893,10 +900,17 @@ def without_duplicate_runner_flags(args, flags):
     return result
 
 
-def tutti_cli_command():
+def tutti_cli_command(platform=None):
     configured = os.environ.get("TUTTI_CLI", "").strip()
     if not configured:
         raise RuntimeError("TUTTI_CLI is not configured")
+    platform = platform or os.name
+    if platform == "nt":
+        executable = Path(configured)
+        if not executable.is_absolute() or executable.suffix.lower() != ".exe":
+            raise RuntimeError("Windows TUTTI_CLI must be an absolute .exe path")
+        if not executable.is_file():
+            raise RuntimeError(f"TUTTI_CLI executable was not found: {configured}")
     return configured
 
 
@@ -982,6 +996,8 @@ def run_tutti_cli(args, timeout=60, log_file=None):
             command,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except FileNotFoundError as exc:
@@ -1049,9 +1065,7 @@ def start_agent_session(automation, run, log_file):
         build_run_display_prompt(automation, run),
     ]
     if run.get("trigger") == "manual":
-        args.extend(["--show", "true"])
-    else:
-        args.extend(["--show", "false"])
+        args.append("--show")
     if settings.get("model"):
         args.extend(["--model", settings["model"]])
     if settings.get("reasoningEffort"):
@@ -3078,6 +3092,13 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
+class AutomationHTTPServer(ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], EXPECTED_CLIENT_DISCONNECT_ERRORS):
+            return
+        super().handle_error(request, client_address)
+
+
 def context_payload():
     return {
         "workspaceId": WORKSPACE_ID,
@@ -3099,7 +3120,7 @@ def main():
     print(f"Automation listening on {host}:{port}", flush=True)
     if os.environ.get("TUTTI_AUTOMATION_STATIC_DIR"):
         print(f"Automation static dir override: {STATIC_DIR}", flush=True)
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+    AutomationHTTPServer((host, port), Handler).serve_forever()
 
 
 if __name__ == "__main__":

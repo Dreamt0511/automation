@@ -73,6 +73,72 @@ def normalized_agent_catalog(default_agent_target_id="local:codex", agents=None,
     }
 
 
+class TuttiCLIInvocationTest(unittest.TestCase):
+    def test_native_cli_path_is_passed_directly_to_subprocess(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            module = load_server_module(root)
+            try:
+                executable = root / "Tutti CLI" / "tutti.exe"
+                executable.parent.mkdir(parents=True)
+                executable.write_bytes(b"")
+                with mock.patch.dict(
+                    os.environ, {"TUTTI_CLI": str(executable)}, clear=False
+                ), mock.patch.object(module.subprocess, "run") as run:
+                    run.return_value = mock.Mock(returncode=0, stdout="{}", stderr="")
+                    module.run_tutti_cli(["agent", "list"])
+
+                self.assertEqual(
+                    run.call_args.args[0],
+                    [str(executable), "--json", "agent", "list"],
+                )
+                self.assertNotIn("shell", run.call_args.kwargs)
+            finally:
+                module.STORE.db.close()
+
+    def test_windows_rejects_batch_tutti_cli(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            try:
+                shim = Path(temp_dir) / "tutti.cmd"
+                shim.write_text("@echo off\r\n", encoding="utf-8")
+                with mock.patch.dict(os.environ, {"TUTTI_CLI": str(shim)}):
+                    with self.assertRaisesRegex(RuntimeError, "absolute .exe"):
+                        module.tutti_cli_command(platform="nt")
+            finally:
+                module.STORE.db.close()
+
+
+class AutomationHTTPServerTest(unittest.TestCase):
+    def test_expected_client_disconnect_does_not_emit_a_server_traceback(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            try:
+                server = object.__new__(module.AutomationHTTPServer)
+                with mock.patch.object(module.ThreadingHTTPServer, "handle_error") as fallback:
+                    try:
+                        raise ConnectionAbortedError("client closed the connection")
+                    except ConnectionAbortedError:
+                        server.handle_error(None, ("127.0.0.1", 1234))
+                fallback.assert_not_called()
+            finally:
+                module.STORE.db.close()
+
+    def test_unexpected_request_error_uses_the_standard_error_handler(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            try:
+                server = object.__new__(module.AutomationHTTPServer)
+                with mock.patch.object(module.ThreadingHTTPServer, "handle_error") as fallback:
+                    try:
+                        raise RuntimeError("unexpected")
+                    except RuntimeError:
+                        server.handle_error(None, ("127.0.0.1", 1234))
+                fallback.assert_called_once_with(None, ("127.0.0.1", 1234))
+            finally:
+                module.STORE.db.close()
+
+
 class RunnerOptionsPayloadTest(unittest.TestCase):
     def test_agent_catalog_falls_back_only_for_exact_unknown_agent_list(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -827,7 +893,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 start_call[start_call.index("--display-prompt") + 1],
                 "Review the workspace.",
             )
-            self.assertEqual(start_call[start_call.index("--show") + 1], "true")
+            self.assertIn("--show", start_call)
 
     def test_scheduled_run_stays_visible_without_activating_agent_gui(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -869,7 +935,7 @@ class AgentSessionLaunchTest(unittest.TestCase):
                 start_call[start_call.index("--display-prompt") + 1],
                 "Review the workspace.",
             )
-            self.assertEqual(start_call[start_call.index("--show") + 1], "false")
+            self.assertNotIn("--show", start_call)
 
     def test_second_agent_uses_generic_agent_start(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1839,6 +1905,22 @@ class AgentGetLogCompactionTest(unittest.TestCase):
 
             self.assertIn("runtimeContext", log_text)
             self.assertNotIn("[automation] stdout compacted:", log_text)
+
+    def test_run_tutti_cli_decodes_cli_output_as_utf8(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = load_server_module(Path(temp_dir))
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout='{"providers": []}',
+                stderr="",
+            )
+
+            with mock.patch.object(module.subprocess, "run", return_value=completed) as run_mock:
+                module.run_tutti_cli(["agent", "list"])
+
+            self.assertEqual(run_mock.call_args.kwargs["encoding"], "utf-8")
+            self.assertEqual(run_mock.call_args.kwargs["errors"], "replace")
 
 
 class AgentWaitProtocolTest(unittest.TestCase):

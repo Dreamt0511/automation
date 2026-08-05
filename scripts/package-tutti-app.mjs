@@ -53,7 +53,7 @@ export async function packageTuttiApp(options = {}) {
     ...(options.version ? { version: String(options.version) } : {}),
   };
 
-  await run('pnpm', ['build:web'], { cwd: repoRoot });
+  await runPackageManager(['build:web'], { cwd: repoRoot });
   await rm(packageRoot, { recursive: true, force: true });
   await mkdir(packageRoot, { recursive: true });
 
@@ -158,9 +158,21 @@ function run(command, args, options) {
   });
 }
 
+function runPackageManager(args, options) {
+  const entrypoint = process.env.npm_execpath?.trim();
+  if (!entrypoint) {
+    throw new Error('npm_execpath is required to run the package manager');
+  }
+  return run(process.execPath, [entrypoint, ...args], options);
+}
+
 async function createPackageArchive(packageRoot, archivePath) {
   await mkdir(path.dirname(archivePath), { recursive: true });
   await rm(archivePath, { force: true });
+  if (process.platform === 'win32') {
+    await run('tar.exe', ['-a', '-c', '-f', archivePath, '.'], { cwd: packageRoot });
+    return;
+  }
   await run('zip', ['-qr', archivePath, '.'], { cwd: packageRoot });
 }
 
