@@ -6,6 +6,7 @@ import shlex
 import signal
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -33,6 +34,12 @@ PROJECT_MARKERS = ("package.json", "go.mod", "pyproject.toml", "Cargo.toml", ".g
 RESULT_STATUS_VALUES = {"success", "fail", "skip"}
 RUNNER_OPTIONS_COMPOSER_TIMEOUT_SECONDS = float(
     os.environ.get("TUTTI_AUTOMATION_RUNNER_OPTIONS_COMPOSER_TIMEOUT_SECONDS", "8") or "8"
+)
+
+EXPECTED_CLIENT_DISCONNECT_ERRORS = (
+    BrokenPipeError,
+    ConnectionAbortedError,
+    ConnectionResetError,
 )
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -900,6 +907,39 @@ def tutti_cli_command():
     return configured
 
 
+def tutti_cli_invocation(platform=None):
+    command_path = tutti_cli_command()
+    platform = platform or os.name
+    if platform != "nt" or Path(command_path).suffix.lower() not in {".cmd", ".bat"}:
+        return command_path, None
+
+    try:
+        content = Path(command_path).read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise RuntimeError(f"TUTTI_CLI executable was not found: {command_path}") from exc
+
+    target_match = re.search(
+        r'^\s*@?"([^"\r\n]+\.exe)"\s+%\*\s*$',
+        content,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    if not target_match:
+        raise RuntimeError(f"unsupported Windows TUTTI_CLI shim: {command_path}")
+    target_path = Path(target_match.group(1))
+    if not target_path.is_file():
+        raise RuntimeError(f"TUTTI_CLI executable was not found: {target_path}")
+
+    command_env = os.environ.copy()
+    state_match = re.search(
+        r'^\s*(?:if\s+"%TUTTI_STATE_DIR%"==""\s+)?set\s+"TUTTI_STATE_DIR=([^"\r\n]+)"\s*$',
+        content,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    if state_match and not command_env.get("TUTTI_STATE_DIR"):
+        command_env["TUTTI_STATE_DIR"] = state_match.group(1)
+    return str(target_path), command_env
+
+
 APPROVAL_REQUIRED_ERROR = (
     "Agent requested approval; automation runs cannot wait for interactive approval."
 )
@@ -971,7 +1011,7 @@ def write_cli_log_output(log_file, stdout_text, *, compact_stdout=False):
 
 
 def run_tutti_cli(args, timeout=60, log_file=None):
-    command_path = tutti_cli_command()
+    command_path, command_env = tutti_cli_invocation()
     command = [command_path, "--json", *args]
     compact_stdout = is_agent_get_poll_args(args)
     if log_file:
@@ -982,7 +1022,10 @@ def run_tutti_cli(args, timeout=60, log_file=None):
             command,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
+            env=command_env,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"TUTTI_CLI executable was not found: {command_path}") from exc
@@ -1049,9 +1092,7 @@ def start_agent_session(automation, run, log_file):
         build_run_display_prompt(automation, run),
     ]
     if run.get("trigger") == "manual":
-        args.extend(["--show", "true"])
-    else:
-        args.extend(["--show", "false"])
+        args.append("--show")
     if settings.get("model"):
         args.extend(["--model", settings["model"]])
     if settings.get("reasoningEffort"):
@@ -3078,6 +3119,13 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
+class AutomationHTTPServer(ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], EXPECTED_CLIENT_DISCONNECT_ERRORS):
+            return
+        super().handle_error(request, client_address)
+
+
 def context_payload():
     return {
         "workspaceId": WORKSPACE_ID,
@@ -3099,7 +3147,7 @@ def main():
     print(f"Automation listening on {host}:{port}", flush=True)
     if os.environ.get("TUTTI_AUTOMATION_STATIC_DIR"):
         print(f"Automation static dir override: {STATIC_DIR}", flush=True)
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+    AutomationHTTPServer((host, port), Handler).serve_forever()
 
 
 if __name__ == "__main__":
