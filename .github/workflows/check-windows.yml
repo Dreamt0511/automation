@@ -1,0 +1,35 @@
+name: Windows Runtime Check
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/check-windows.yml"
+      - "server.py"
+      - "server_test.py"
+      - "scripts/package-tutti-app.mjs"
+      - "web/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:server
+      - run: pnpm typecheck
+      - run: pnpm package:tutti-app

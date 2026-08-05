@@ -74,40 +74,37 @@ def normalized_agent_catalog(default_agent_target_id="local:codex", agents=None,
 
 
 class TuttiCLIInvocationTest(unittest.TestCase):
-    def test_windows_batch_shim_resolves_to_executable_without_shell(self):
+    def test_native_cli_path_is_passed_directly_to_subprocess(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             module = load_server_module(root)
             try:
-                executable = root / "tutti-dev.exe"
+                executable = root / "Tutti CLI" / "tutti.exe"
+                executable.parent.mkdir(parents=True)
                 executable.write_bytes(b"")
-                shim = root / "tutti-dev.cmd"
-                state_dir = root / "state"
-                shim.write_text(
-                    "@echo off\r\n"
-                    f'if "%TUTTI_STATE_DIR%"=="" set "TUTTI_STATE_DIR={state_dir}"\r\n'
-                    f'"{executable}" %*\r\n',
-                    encoding="utf-8",
+                with mock.patch.dict(
+                    os.environ, {"TUTTI_CLI": str(executable)}, clear=False
+                ), mock.patch.object(module.subprocess, "run") as run:
+                    run.return_value = mock.Mock(returncode=0, stdout="{}", stderr="")
+                    module.run_tutti_cli(["agent", "list"])
+
+                self.assertEqual(
+                    run.call_args.args[0],
+                    [str(executable), "--json", "agent", "list"],
                 )
-
-                with mock.patch.dict(os.environ, {"TUTTI_CLI": str(shim)}, clear=False):
-                    os.environ.pop("TUTTI_STATE_DIR", None)
-                    command, command_env = module.tutti_cli_invocation(platform="nt")
-
-                self.assertEqual(command, str(executable))
-                self.assertEqual(command_env["TUTTI_STATE_DIR"], str(state_dir))
+                self.assertNotIn("shell", run.call_args.kwargs)
             finally:
                 module.STORE.db.close()
 
-    def test_non_windows_cli_path_is_unchanged(self):
+    def test_windows_rejects_batch_tutti_cli(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = load_server_module(Path(temp_dir))
             try:
-                with mock.patch.dict(os.environ, {"TUTTI_CLI": "/usr/local/bin/tutti"}):
-                    self.assertEqual(
-                        module.tutti_cli_invocation(platform="posix"),
-                        ("/usr/local/bin/tutti", None),
-                    )
+                shim = Path(temp_dir) / "tutti.cmd"
+                shim.write_text("@echo off\r\n", encoding="utf-8")
+                with mock.patch.dict(os.environ, {"TUTTI_CLI": str(shim)}):
+                    with self.assertRaisesRegex(RuntimeError, "absolute .exe"):
+                        module.tutti_cli_command(platform="nt")
             finally:
                 module.STORE.db.close()
 

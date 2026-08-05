@@ -900,44 +900,18 @@ def without_duplicate_runner_flags(args, flags):
     return result
 
 
-def tutti_cli_command():
+def tutti_cli_command(platform=None):
     configured = os.environ.get("TUTTI_CLI", "").strip()
     if not configured:
         raise RuntimeError("TUTTI_CLI is not configured")
-    return configured
-
-
-def tutti_cli_invocation(platform=None):
-    command_path = tutti_cli_command()
     platform = platform or os.name
-    if platform != "nt" or Path(command_path).suffix.lower() not in {".cmd", ".bat"}:
-        return command_path, None
-
-    try:
-        content = Path(command_path).read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
-        raise RuntimeError(f"TUTTI_CLI executable was not found: {command_path}") from exc
-
-    target_match = re.search(
-        r'^\s*@?"([^"\r\n]+\.exe)"\s+%\*\s*$',
-        content,
-        re.IGNORECASE | re.MULTILINE,
-    )
-    if not target_match:
-        raise RuntimeError(f"unsupported Windows TUTTI_CLI shim: {command_path}")
-    target_path = Path(target_match.group(1))
-    if not target_path.is_file():
-        raise RuntimeError(f"TUTTI_CLI executable was not found: {target_path}")
-
-    command_env = os.environ.copy()
-    state_match = re.search(
-        r'^\s*(?:if\s+"%TUTTI_STATE_DIR%"==""\s+)?set\s+"TUTTI_STATE_DIR=([^"\r\n]+)"\s*$',
-        content,
-        re.IGNORECASE | re.MULTILINE,
-    )
-    if state_match and not command_env.get("TUTTI_STATE_DIR"):
-        command_env["TUTTI_STATE_DIR"] = state_match.group(1)
-    return str(target_path), command_env
+    if platform == "nt":
+        executable = Path(configured)
+        if not executable.is_absolute() or executable.suffix.lower() != ".exe":
+            raise RuntimeError("Windows TUTTI_CLI must be an absolute .exe path")
+        if not executable.is_file():
+            raise RuntimeError(f"TUTTI_CLI executable was not found: {configured}")
+    return configured
 
 
 APPROVAL_REQUIRED_ERROR = (
@@ -1011,7 +985,7 @@ def write_cli_log_output(log_file, stdout_text, *, compact_stdout=False):
 
 
 def run_tutti_cli(args, timeout=60, log_file=None):
-    command_path, command_env = tutti_cli_invocation()
+    command_path = tutti_cli_command()
     command = [command_path, "--json", *args]
     compact_stdout = is_agent_get_poll_args(args)
     if log_file:
@@ -1025,7 +999,6 @@ def run_tutti_cli(args, timeout=60, log_file=None):
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
-            env=command_env,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"TUTTI_CLI executable was not found: {command_path}") from exc
