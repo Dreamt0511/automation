@@ -30,6 +30,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: pnpm install --frozen-lockfile
-      - run: python -m unittest -v server_test.py
+      - run: python -m py_compile server.py
+      - run: python -m unittest -v server_test.TuttiCLIInvocationTest
       - run: pnpm typecheck
       - run: pnpm package:tutti-app
